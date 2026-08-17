@@ -11,6 +11,10 @@ ChatGPT 官方图标和青绿色旋转圆点。启动器持续枚举可见的顶
 路径；检测到真正的 ChatGPT 主窗口后自动关闭 Loading。等待超过 60 秒或进程异常退出时，Loading
 会关闭并显示错误对话框。
 
+## 启动效果
+
+![startChatGPT Splash 启动画面](assets/splash.png)
+
 ## 编译
 
 ```powershell
