@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,11 +11,18 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+mod config;
+mod settings;
 mod splash;
 
 const PACKAGE_PREFIX: &str = "OpenAI.Codex_";
-const PROXY_ARGUMENT: &str = "--proxy-server=http://127.0.0.1:10808";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+struct LaunchOptions {
+    show_settings: bool,
+    proxy_override: Option<config::ProxySetting>,
+    forwarded: Vec<OsString>,
+}
 
 fn main() {
     if let Err(message) = run() {
@@ -33,15 +41,35 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
+    if option_env!("STARTCHATGPT_SETTINGS_PREVIEW").is_some() {
+        settings::show(&config::ProxySetting::default())?;
+        return Ok(());
+    }
+
+    let options = parse_launch_options(env::args_os().skip(1))?;
+    let saved_setting = config::load()?;
+    let proxy_setting = if options.show_settings || settings::shift_pressed() {
+        let Some(setting) = settings::show(&saved_setting)? else {
+            return Ok(());
+        };
+        config::save(&setting)?;
+        setting
+    } else {
+        options.proxy_override.unwrap_or(saved_setting)
+    };
+
     let exe = find_chatgpt()?;
     let working_dir = exe
         .parent()
         .ok_or_else(|| format!("无效的 ChatGPT 路径：{}", exe.display()))?;
 
     let mut splash = splash::Splash::new();
-    let mut child = Command::new(&exe)
-        .arg(PROXY_ARGUMENT)
-        .args(env::args_os().skip(1))
+    let mut command = Command::new(&exe);
+    if let Some(argument) = proxy_setting.launch_argument() {
+        command.arg(argument);
+    }
+    let mut child = command
+        .args(options.forwarded)
         .current_dir(working_dir)
         .spawn()
         .map_err(|error| format!("启动 {} 失败：{error}", exe.display()))?;
@@ -73,6 +101,30 @@ fn run() -> Result<(), String> {
 
         thread::sleep(Duration::from_millis(40));
     }
+}
+
+fn parse_launch_options(args: impl IntoIterator<Item = OsString>) -> Result<LaunchOptions, String> {
+    let mut options = LaunchOptions {
+        show_settings: false,
+        proxy_override: None,
+        forwarded: Vec::new(),
+    };
+    for argument in args {
+        let Some(text) = argument.to_str() else {
+            options.forwarded.push(argument);
+            continue;
+        };
+        if text == "--settings" {
+            options.show_settings = true;
+        } else if text == "--no-proxy" {
+            options.proxy_override = Some(config::ProxySetting::Direct);
+        } else if let Some(value) = text.strip_prefix("--proxy=") {
+            options.proxy_override = Some(config::ProxySetting::proxy(value)?);
+        } else {
+            options.forwarded.push(argument);
+        }
+    }
+    Ok(options)
 }
 
 fn find_chatgpt() -> Result<PathBuf, String> {
@@ -239,5 +291,21 @@ mod tests {
     fn compares_versions_numerically() {
         assert!(compare_version(&[26, 900, 1, 0], &[26, 810, 7004, 0]).is_gt());
         assert!(compare_version(&[26, 810, 7004], &[26, 810, 7004, 0]).is_eq());
+    }
+
+    #[test]
+    fn parses_launcher_options_without_forwarding_them() {
+        let options = parse_launch_options([
+            "--settings".into(),
+            "--proxy=http://127.0.0.1:7890".into(),
+            "--some-chatgpt-option".into(),
+        ])
+        .unwrap();
+        assert!(options.show_settings);
+        assert_eq!(
+            options.proxy_override,
+            Some(config::ProxySetting::Proxy("http://127.0.0.1:7890".into()))
+        );
+        assert_eq!(options.forwarded, ["--some-chatgpt-option"]);
     }
 }
