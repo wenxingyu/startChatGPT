@@ -19,7 +19,7 @@ type Uint = u32;
 type Wparam = usize;
 
 const WINDOW_WIDTH: i32 = 580;
-const WINDOW_HEIGHT: i32 = 320;
+const WINDOW_HEIGHT: i32 = 290;
 const WM_DESTROY: Uint = 0x0002;
 const WM_CLOSE: Uint = 0x0010;
 const WM_SETFONT: Uint = 0x0030;
@@ -224,7 +224,7 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&mut state as *mut State) as isize);
 
         let font = CreateFontW(
-            -16,
+            -14,
             0,
             0,
             0,
@@ -259,9 +259,9 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             "EDIT",
             current.proxy_url().unwrap_or(DEFAULT_PROXY),
             30,
-            58,
+            63,
             510,
-            36,
+            26,
             WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
             0,
             font,
@@ -272,7 +272,7 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             "STATIC",
             "支持 http、https、socks4 和 socks5，例如：http://127.0.0.1:10808",
             30,
-            102,
+            97,
             510,
             24,
             0,
@@ -285,7 +285,7 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             "BUTTON",
             "不使用代理（直接连接）",
             30,
-            138,
+            130,
             250,
             30,
             WS_TABSTOP | BS_AUTOCHECKBOX,
@@ -298,9 +298,9 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             "BUTTON",
             "恢复默认",
             30,
-            210,
-            110,
-            38,
+            190,
+            95,
+            32,
             WS_TABSTOP | BS_PUSHBUTTON,
             ID_DEFAULT,
             font,
@@ -310,10 +310,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "BUTTON",
             "取消",
-            330,
-            210,
-            90,
-            38,
+            350,
+            190,
+            80,
+            32,
             WS_TABSTOP | BS_PUSHBUTTON,
             ID_CANCEL,
             font,
@@ -323,10 +323,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "BUTTON",
             "保存并启动",
-            430,
-            210,
-            110,
-            38,
+            440,
+            190,
+            100,
+            32,
             WS_TABSTOP | BS_DEFPUSHBUTTON,
             ID_SAVE,
             font,
