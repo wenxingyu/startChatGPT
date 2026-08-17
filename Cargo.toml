@@ -3,6 +3,9 @@ name = "start-chat-gpt"
 version = "1.1.1"
 edition = "2024"
 build = "build.rs"
+license = "MIT"
+repository = "https://github.com/wenxingyu/startChatGPT"
+description = "A lightweight Windows launcher for ChatGPT/Codex with configurable proxy support"
 
 [[bin]]
 name = "startChatGPT"

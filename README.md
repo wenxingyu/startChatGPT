@@ -1,5 +1,8 @@
 # startChatGPT
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Build Windows executable](https://github.com/wenxingyu/startChatGPT/actions/workflows/build.yml/badge.svg)](https://github.com/wenxingyu/startChatGPT/actions/workflows/build.yml)
+
 一个轻量级 Windows 启动器：自动找到最新版 `OpenAI.Codex` 中的 ChatGPT，并使用你保存的代理
 设置启动。ChatGPT 升级、安装目录变化后，不需要重新修改快捷方式。
 
@@ -27,6 +30,20 @@
 ![startChatGPT 代理设置窗口](assets/settings.png)
 
 设置保存在 `%APPDATA%\startChatGPT\config.txt`，不会因为 ChatGPT 升级而丢失。
+
+## Code signing policy
+
+项目正在申请 SignPath Foundation 的免费开源代码签名。申请获批前，Release
+中的程序仍是未签名版本。签名流程、团队角色与隐私说明请参阅
+[Code signing policy](CODE_SIGNING_POLICY.md)。
+
+计划采用的签名服务声明：Free code signing provided by SignPath.io,
+certificate by SignPath Foundation。
+
+## 隐私
+
+启动器不收集分析数据或遥测信息。代理设置只保存在本机；只有用户明确启动
+ChatGPT 时，程序才会按照用户选择的连接方式启动本机已安装的 ChatGPT。
 
 ## 命令行用法
 
@@ -59,3 +76,7 @@ cd C:\Code\ontology\startChatGPT-rust
 
 Release 配置针对体积优化：完整 LTO、单 codegen unit、`panic = "abort"` 并移除符号。
 ChatGPT 官方图标通过项目内的 Windows 资源对象嵌入。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。
