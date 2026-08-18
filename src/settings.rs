@@ -22,11 +22,10 @@ const WINDOW_WIDTH: i32 = 580;
 const WINDOW_HEIGHT: i32 = 290;
 const WM_DESTROY: Uint = 0x0002;
 const WM_CLOSE: Uint = 0x0010;
+const WM_DRAWITEM: Uint = 0x002b;
 const WM_SETFONT: Uint = 0x0030;
+const WM_GETFONT: Uint = 0x0031;
 const WM_COMMAND: Uint = 0x0111;
-const BM_GETCHECK: Uint = 0x00f0;
-const BM_SETCHECK: Uint = 0x00f1;
-const BST_CHECKED: Wparam = 1;
 const WS_OVERLAPPED: Dword = 0;
 const WS_CAPTION: Dword = 0x00c0_0000;
 const WS_SYSMENU: Dword = 0x0008_0000;
@@ -38,10 +37,11 @@ const WS_EX_APPWINDOW: Dword = 0x0004_0000;
 const ES_AUTOHSCROLL: Dword = 0x0080;
 const BS_PUSHBUTTON: Dword = 0;
 const BS_DEFPUSHBUTTON: Dword = 1;
-const BS_AUTOCHECKBOX: Dword = 3;
+const BS_OWNERDRAW: Dword = 11;
 const SW_SHOW: i32 = 5;
 const GWLP_USERDATA: i32 = -21;
 const COLOR_BTNFACE: usize = 15;
+const COLOR_BTNTEXT: i32 = 18;
 const IMAGE_ICON: Uint = 1;
 const LR_SHARED: Uint = 0x0000_8000;
 const DEFAULT_CHARSET: Dword = 1;
@@ -52,12 +52,45 @@ const ID_CANCEL: u16 = 1002;
 const ID_DIRECT: u16 = 1003;
 const ID_DEFAULT: u16 = 1004;
 const VK_SHIFT: i32 = 0x10;
+const ODS_SELECTED: Uint = 0x0001;
+const ODS_FOCUS: Uint = 0x0010;
+const DFC_BUTTON: Uint = 4;
+const DFCS_BUTTONCHECK: Uint = 0;
+const DFCS_PUSHED: Uint = 0x0200;
+const DFCS_CHECKED: Uint = 0x0400;
+const DT_LEFT: Uint = 0;
+const DT_VCENTER: Uint = 0x0004;
+const DT_SINGLELINE: Uint = 0x0020;
+const DT_NOPREFIX: Uint = 0x0800;
+const TRANSPARENT: i32 = 1;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct Point {
     x: i32,
     y: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[repr(C)]
+struct DrawItemStruct {
+    control_type: Uint,
+    control_id: Uint,
+    item_id: Uint,
+    item_action: Uint,
+    item_state: Uint,
+    hwnd_item: Hwnd,
+    hdc: Handle,
+    rect: Rect,
+    item_data: usize,
 }
 
 #[repr(C)]
@@ -120,6 +153,7 @@ unsafe extern "system" {
     fn GetWindowTextW(hwnd: Hwnd, text: *mut u16, maximum: i32) -> i32;
     fn EnableWindow(hwnd: Hwnd, enable: Bool) -> Bool;
     fn SetFocus(hwnd: Hwnd) -> Hwnd;
+    fn InvalidateRect(hwnd: Hwnd, rect: *const Rect, erase: Bool) -> Bool;
     fn GetSystemMetrics(index: i32) -> i32;
     fn GetDpiForSystem() -> Uint;
     fn SetProcessDPIAware() -> Bool;
@@ -134,6 +168,12 @@ unsafe extern "system" {
     ) -> Handle;
     fn MessageBoxW(hwnd: Hwnd, text: *const u16, caption: *const u16, kind: Uint) -> i32;
     fn GetAsyncKeyState(key: i32) -> i16;
+    fn DrawFrameControl(hdc: Handle, rect: *mut Rect, kind: Uint, state: Uint) -> Bool;
+    fn DrawFocusRect(hdc: Handle, rect: *const Rect) -> Bool;
+    fn DrawTextW(hdc: Handle, text: *const u16, length: i32, rect: *mut Rect, format: Uint) -> i32;
+    fn FillRect(hdc: Handle, rect: *const Rect, brush: Hbrush) -> i32;
+    fn GetSysColorBrush(index: i32) -> Hbrush;
+    fn GetSysColor(index: i32) -> Dword;
 }
 
 #[link(name = "gdi32")]
@@ -155,6 +195,9 @@ unsafe extern "system" {
         face: *const u16,
     ) -> Hfont;
     fn DeleteObject(object: Handle) -> Bool;
+    fn SelectObject(hdc: Handle, object: Handle) -> Handle;
+    fn SetBkMode(hdc: Handle, mode: i32) -> i32;
+    fn SetTextColor(hdc: Handle, color: Dword) -> Dword;
 }
 
 #[link(name = "kernel32")]
@@ -165,6 +208,8 @@ unsafe extern "system" {
 struct State {
     edit: Hwnd,
     direct: Hwnd,
+    direct_checked: bool,
+    dpi: Uint,
     result: Option<ProxySetting>,
     finished: bool,
 }
@@ -205,6 +250,8 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
         let mut state = State {
             edit: null_mut(),
             direct: null_mut(),
+            direct_checked: matches!(current, ProxySetting::Direct),
+            dpi,
             result: None,
             finished: false,
         };
@@ -294,7 +341,7 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             scale(130, dpi),
             scale(250, dpi),
             scale(30, dpi),
-            WS_TABSTOP | BS_AUTOCHECKBOX,
+            WS_TABSTOP | BS_OWNERDRAW,
             ID_DIRECT,
             font,
         );
@@ -339,7 +386,6 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
         );
 
         if matches!(current, ProxySetting::Direct) {
-            SendMessageW(state.direct, BM_SETCHECK, BST_CHECKED, 0);
             EnableWindow(state.edit, 0);
         }
 
@@ -404,6 +450,7 @@ unsafe extern "system" fn window_proc(
             unsafe { handle_command(hwnd, (w_param & 0xffff) as u16) };
             0
         }
+        WM_DRAWITEM => unsafe { draw_direct_checkbox(hwnd, l_param) },
         WM_CLOSE => {
             unsafe {
                 if let Some(state) = state(hwnd) {
@@ -427,16 +474,19 @@ unsafe fn handle_command(hwnd: Hwnd, id: u16) {
     };
     match id {
         ID_DIRECT => {
-            let direct =
-                unsafe { SendMessageW(state.direct, BM_GETCHECK, 0, 0) } as Wparam == BST_CHECKED;
-            unsafe { EnableWindow(state.edit, (!direct).into()) };
-            if !direct {
+            state.direct_checked = !state.direct_checked;
+            unsafe {
+                EnableWindow(state.edit, (!state.direct_checked).into());
+                InvalidateRect(state.direct, null(), 1);
+            }
+            if !state.direct_checked {
                 unsafe { SetFocus(state.edit) };
             }
         }
         ID_DEFAULT => unsafe {
             SetWindowTextW(state.edit, wide(DEFAULT_PROXY).as_ptr());
-            SendMessageW(state.direct, BM_SETCHECK, 0, 0);
+            state.direct_checked = false;
+            InvalidateRect(state.direct, null(), 1);
             EnableWindow(state.edit, 1);
             SetFocus(state.edit);
         },
@@ -445,9 +495,7 @@ unsafe fn handle_command(hwnd: Hwnd, id: u16) {
             DestroyWindow(hwnd);
         },
         ID_SAVE => {
-            let direct =
-                unsafe { SendMessageW(state.direct, BM_GETCHECK, 0, 0) } as Wparam == BST_CHECKED;
-            let setting = if direct {
+            let setting = if state.direct_checked {
                 Ok(ProxySetting::Direct)
             } else {
                 ProxySetting::proxy(unsafe { window_text(state.edit) })
@@ -471,6 +519,70 @@ unsafe fn handle_command(hwnd: Hwnd, id: u16) {
         }
         _ => {}
     }
+}
+
+unsafe fn draw_direct_checkbox(parent: Hwnd, l_param: Lparam) -> Lresult {
+    let Some(draw) = (unsafe { (l_param as *mut DrawItemStruct).as_ref() }) else {
+        return 0;
+    };
+    let Some(state) = (unsafe { state(parent) }) else {
+        return 0;
+    };
+    if draw.hwnd_item != state.direct {
+        return 0;
+    }
+
+    unsafe {
+        FillRect(draw.hdc, &draw.rect, GetSysColorBrush(COLOR_BTNFACE as i32));
+
+        let box_size = scale(18, state.dpi);
+        let box_top = draw.rect.top + (draw.rect.bottom - draw.rect.top - box_size) / 2;
+        let mut checkbox = Rect {
+            left: draw.rect.left,
+            top: box_top,
+            right: draw.rect.left + box_size,
+            bottom: box_top + box_size,
+        };
+        let mut checkbox_state = DFCS_BUTTONCHECK;
+        if state.direct_checked {
+            checkbox_state |= DFCS_CHECKED;
+        }
+        if draw.item_state & ODS_SELECTED != 0 {
+            checkbox_state |= DFCS_PUSHED;
+        }
+        DrawFrameControl(draw.hdc, &mut checkbox, DFC_BUTTON, checkbox_state);
+
+        let font = SendMessageW(draw.hwnd_item, WM_GETFONT, 0, 0) as Handle;
+        let old_font = SelectObject(draw.hdc, font);
+        SetBkMode(draw.hdc, TRANSPARENT);
+        SetTextColor(draw.hdc, GetSysColor(COLOR_BTNTEXT));
+        let label = wide("不使用代理（直接连接）");
+        let mut text_rect = Rect {
+            left: checkbox.right + scale(8, state.dpi),
+            top: draw.rect.top,
+            right: draw.rect.right,
+            bottom: draw.rect.bottom,
+        };
+        DrawTextW(
+            draw.hdc,
+            label.as_ptr(),
+            (label.len() - 1) as i32,
+            &mut text_rect,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        );
+        SelectObject(draw.hdc, old_font);
+
+        if draw.item_state & ODS_FOCUS != 0 {
+            let focus = Rect {
+                left: text_rect.left - scale(3, state.dpi),
+                top: text_rect.top + scale(2, state.dpi),
+                right: text_rect.right,
+                bottom: text_rect.bottom - scale(2, state.dpi),
+            };
+            DrawFocusRect(draw.hdc, &focus);
+        }
+    }
+    1
 }
 
 unsafe fn state(hwnd: Hwnd) -> Option<&'static mut State> {
