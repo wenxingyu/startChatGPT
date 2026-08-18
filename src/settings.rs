@@ -121,6 +121,8 @@ unsafe extern "system" {
     fn EnableWindow(hwnd: Hwnd, enable: Bool) -> Bool;
     fn SetFocus(hwnd: Hwnd) -> Hwnd;
     fn GetSystemMetrics(index: i32) -> i32;
+    fn GetDpiForSystem() -> Uint;
+    fn SetProcessDPIAware() -> Bool;
     fn LoadCursorW(instance: Hinstance, name: *const u16) -> Hcursor;
     fn LoadImageW(
         instance: Hinstance,
@@ -173,6 +175,10 @@ pub fn shift_pressed() -> bool {
 
 pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
     unsafe {
+        SetProcessDPIAware();
+        let dpi = GetDpiForSystem().max(96);
+        let window_width = scale(WINDOW_WIDTH, dpi);
+        let window_height = scale(WINDOW_HEIGHT, dpi);
         let instance = GetModuleHandleW(null());
         let class_name = wide("StartChatGPTSettings");
         let class = WindowClass {
@@ -185,8 +191,8 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
                 instance,
                 std::ptr::without_provenance(1),
                 IMAGE_ICON,
-                32,
-                32,
+                scale(32, dpi),
+                scale(32, dpi),
                 LR_SHARED,
             ),
             cursor: LoadCursorW(null_mut(), std::ptr::without_provenance(32512)),
@@ -202,8 +208,8 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             result: None,
             finished: false,
         };
-        let x = (GetSystemMetrics(0) - WINDOW_WIDTH) / 2;
-        let y = (GetSystemMetrics(1) - WINDOW_HEIGHT) / 2;
+        let x = (GetSystemMetrics(0) - window_width) / 2;
+        let y = (GetSystemMetrics(1) - window_height) / 2;
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
             class_name.as_ptr(),
@@ -211,8 +217,8 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
             x,
             y,
-            WINDOW_WIDTH,
-            WINDOW_HEIGHT,
+            window_width,
+            window_height,
             null_mut(),
             null_mut(),
             instance,
@@ -224,7 +230,7 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&mut state as *mut State) as isize);
 
         let font = CreateFontW(
-            -14,
+            -scale(14, dpi),
             0,
             0,
             0,
@@ -245,10 +251,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "STATIC",
             "代理服务器地址",
-            30,
-            28,
-            500,
-            24,
+            scale(30, dpi),
+            scale(28, dpi),
+            scale(500, dpi),
+            scale(24, dpi),
             0,
             0,
             font,
@@ -258,10 +264,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "EDIT",
             current.proxy_url().unwrap_or(DEFAULT_PROXY),
-            30,
-            63,
-            510,
-            26,
+            scale(30, dpi),
+            scale(63, dpi),
+            scale(510, dpi),
+            scale(26, dpi),
             WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
             0,
             font,
@@ -271,10 +277,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "STATIC",
             "支持 http、https、socks4 和 socks5，例如：http://127.0.0.1:10808",
-            30,
-            97,
-            510,
-            24,
+            scale(30, dpi),
+            scale(97, dpi),
+            scale(510, dpi),
+            scale(24, dpi),
             0,
             0,
             font,
@@ -284,10 +290,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "BUTTON",
             "不使用代理（直接连接）",
-            30,
-            130,
-            250,
-            30,
+            scale(30, dpi),
+            scale(130, dpi),
+            scale(250, dpi),
+            scale(30, dpi),
             WS_TABSTOP | BS_AUTOCHECKBOX,
             ID_DIRECT,
             font,
@@ -297,10 +303,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "BUTTON",
             "恢复默认",
-            30,
-            190,
-            95,
-            32,
+            scale(30, dpi),
+            scale(190, dpi),
+            scale(95, dpi),
+            scale(32, dpi),
             WS_TABSTOP | BS_PUSHBUTTON,
             ID_DEFAULT,
             font,
@@ -310,10 +316,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "BUTTON",
             "取消",
-            350,
-            190,
-            80,
-            32,
+            scale(350, dpi),
+            scale(190, dpi),
+            scale(80, dpi),
+            scale(32, dpi),
             WS_TABSTOP | BS_PUSHBUTTON,
             ID_CANCEL,
             font,
@@ -323,10 +329,10 @@ pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
             instance,
             "BUTTON",
             "保存并启动",
-            440,
-            190,
-            100,
-            32,
+            scale(440, dpi),
+            scale(190, dpi),
+            scale(100, dpi),
+            scale(32, dpi),
             WS_TABSTOP | BS_DEFPUSHBUTTON,
             ID_SAVE,
             font,
@@ -481,4 +487,8 @@ unsafe fn window_text(hwnd: Hwnd) -> String {
 
 fn wide(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
+}
+
+fn scale(value: i32, dpi: Uint) -> i32 {
+    ((value as i64 * dpi as i64 + 48) / 96) as i32
 }
