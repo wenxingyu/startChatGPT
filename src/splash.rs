@@ -182,8 +182,7 @@ unsafe extern "system" {
     fn LoadCursorW(instance: Hinstance, name: *const u16) -> Hcursor;
     fn GetSystemMetrics(index: i32) -> i32;
     fn GetDpiForSystem() -> Uint;
-    fn GetDpiForWindow(hwnd: Hwnd) -> Uint;
-    fn SetThreadDpiAwarenessContext(context: Handle) -> Handle;
+    fn SetProcessDPIAware() -> Bool;
     fn SetWindowRgn(hwnd: Hwnd, region: Hrgn, redraw: Bool) -> i32;
     fn EnumWindows(callback: unsafe extern "system" fn(Hwnd, Lparam) -> Bool, data: Lparam)
     -> Bool;
@@ -280,7 +279,6 @@ unsafe extern "system" {
 
 pub struct Splash {
     hwnd: Hwnd,
-    previous_dpi_context: Handle,
 }
 
 unsafe fn enable_dwm_rounding(hwnd: Hwnd) -> bool {
@@ -319,10 +317,10 @@ unsafe fn enable_dwm_rounding(hwnd: Hwnd) -> bool {
 impl Splash {
     pub fn new() -> Option<Self> {
         unsafe {
-            // Keep the settings window unchanged, but render the splash itself at the
-            // monitor's native DPI instead of letting Windows bitmap-scale it.
-            let previous_dpi_context =
-                SetThreadDpiAwarenessContext(std::ptr::without_provenance_mut((-4isize) as usize));
+            // The splash runs in a separate launcher process from the settings window.
+            // System DPI awareness keeps text crisp without constructing a raw DPI
+            // awareness pseudo-handle at runtime.
+            SetProcessDPIAware();
             let dpi = GetDpiForSystem().max(96);
             let width = scale(WIDTH, dpi);
             let height = scale(HEIGHT, dpi);
@@ -363,9 +361,6 @@ impl Splash {
                 null_mut(),
             );
             if hwnd.is_null() {
-                if !previous_dpi_context.is_null() {
-                    SetThreadDpiAwarenessContext(previous_dpi_context);
-                }
                 return None;
             }
 
@@ -376,10 +371,7 @@ impl Splash {
             }
             ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             UpdateWindow(hwnd);
-            Some(Self {
-                hwnd,
-                previous_dpi_context,
-            })
+            Some(Self { hwnd })
         }
     }
 
@@ -401,9 +393,6 @@ impl Drop for Splash {
         unsafe {
             if !self.hwnd.is_null() {
                 DestroyWindow(self.hwnd);
-            }
-            if !self.previous_dpi_context.is_null() {
-                SetThreadDpiAwarenessContext(self.previous_dpi_context);
             }
         }
     }
@@ -428,7 +417,7 @@ unsafe extern "system" fn window_proc(
 
 unsafe fn paint(hwnd: Hwnd) {
     unsafe {
-        let dpi = GetDpiForWindow(hwnd).max(96);
+        let dpi = GetDpiForSystem().max(96);
         let width = scale(WIDTH, dpi);
         let height = scale(HEIGHT, dpi);
         let mut paint: PaintStruct = zeroed();
