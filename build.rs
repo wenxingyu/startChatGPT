@@ -1,14 +1,15 @@
-use std::path::PathBuf;
-
 fn main() {
     println!("cargo::rerun-if-env-changed=STARTCHATGPT_SPLASH_PREVIEW");
     println!("cargo::rerun-if-env-changed=STARTCHATGPT_SETTINGS_PREVIEW");
-    let resource = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("chatgpt_icon_windows_amd64.syso");
+    println!("cargo::rerun-if-changed=assets/chatgpt.ico");
 
-    println!("cargo::rerun-if-changed={}", resource.display());
-    println!(
-        "cargo::rustc-link-arg-bin=startChatGPT={}",
-        resource.display()
-    );
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let mut version_resource = winresource::WindowsResource::new();
+        version_resource
+            .set_icon("assets/chatgpt.ico")
+            .set_language(0x0804);
+        version_resource
+            .compile()
+            .expect("failed to compile Windows version information");
+    }
 }

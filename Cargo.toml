@@ -1,11 +1,19 @@
 [package]
 name = "start-chat-gpt"
-version = "1.1.3"
+version = "1.1.4"
 edition = "2024"
 build = "build.rs"
 license = "MIT"
 repository = "https://github.com/wenxingyu/startChatGPT"
 description = "A lightweight Windows launcher for ChatGPT/Codex with configurable proxy support"
+
+[package.metadata.winresource]
+FileDescription = "startChatGPT - ChatGPT 代理启动器"
+ProductName = "startChatGPT"
+OriginalFilename = "startChatGPT.exe"
+InternalName = "startChatGPT"
+CompanyName = "WenXingyu"
+LegalCopyright = "Copyright © 2026 WenXingyu"
 
 [[bin]]
 name = "startChatGPT"
@@ -19,3 +27,6 @@ panic = "abort"
 strip = "symbols"
 debug = false
 incremental = false
+
+[build-dependencies]
+winresource = "0.1.31"

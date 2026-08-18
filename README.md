@@ -14,6 +14,7 @@
 - 支持不使用代理直接连接
 - 支持命令行临时覆盖代理设置
 - 原生 Windows Splash 动画，ChatGPT 主窗口出现后自动消失
+- EXE 内嵌产品名称、版本、作者和版权等 Windows 文件信息
 - 单文件运行，不需要安装 Rust 或其他运行库
 
 ![startChatGPT Splash 启动画面](assets/splash.png)
@@ -75,7 +76,7 @@ cd C:\Code\ontology\startChatGPT-rust
 ```
 
 Release 配置针对体积优化：完整 LTO、单 codegen unit、`panic = "abort"` 并移除符号。
-ChatGPT 官方图标通过项目内的 Windows 资源对象嵌入。
+构建脚本会从 `Cargo.toml` 自动生成 Windows 文件版本，并与 ChatGPT 图标一起嵌入 EXE。
 
 ## 许可证
 
