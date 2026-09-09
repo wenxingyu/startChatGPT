@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use std::os::windows::process::CommandExt;
 
 mod config;
+mod memory;
 mod settings;
 mod splash;
 mod usage;

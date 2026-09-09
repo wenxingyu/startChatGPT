@@ -215,10 +215,14 @@ impl Bridge {
                 // Avoid exposing server response contents or account identifiers in UI/logs.
                 return Err("额度读取失败，请检查 Codex CLI 登录状态与代理".into());
             }
-            return value
+            let result = value
                 .get("result")
                 .cloned()
                 .ok_or("Codex 返回了无效响应".into());
+            // The app-server stays connected between the infrequent quota
+            // reads, so its inactive code and data pages need not stay resident.
+            crate::memory::child_process(&self.child);
+            return result;
         }
     }
 }

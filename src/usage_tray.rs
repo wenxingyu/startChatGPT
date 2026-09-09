@@ -21,6 +21,14 @@ struct Ui {
     added: bool,
     restart: u32,
     details_open: bool,
+    last_render: Option<RenderKey>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct RenderKey {
+    values: [Option<i32>; 2],
+    stale: bool,
+    size: i32,
 }
 thread_local! { static UI: RefCell<Option<Ui>> = const { RefCell::new(None) }; }
 fn wide(s: &str) -> Vec<u16> {
@@ -52,6 +60,7 @@ pub fn run(app: &Path, proxy: ProxySetting) -> Result<(), String> {
                 added: false,
                 restart: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
                 details_open: false,
+                last_render: None,
             })
         });
         let hwnd = CreateWindowExW(
@@ -295,7 +304,25 @@ unsafe fn make_icon(state: &usage::State, size: i32) -> HICON {
 unsafe fn update(hwnd: HWND) -> bool {
     unsafe {
         let state = UI.with(|ui| ui.borrow().as_ref().unwrap().state.lock().unwrap().clone());
-        let icon = make_icon(&state, icon_size(hwnd));
+        let size = icon_size(hwnd);
+        let key = RenderKey {
+            values: state.windows.each_ref().map(|window| {
+                window
+                    .as_ref()
+                    .map(|window| window.remaining.round() as i32)
+            }),
+            stale: state.stale(),
+            size,
+        };
+        let unchanged = UI.with(|ui| {
+            let ui = ui.borrow();
+            let ui = ui.as_ref().unwrap();
+            ui.added && ui.last_render.as_ref() == Some(&key)
+        });
+        if unchanged {
+            return true;
+        }
+        let icon = make_icon(&state, size);
         if icon.is_null() {
             return false;
         }
@@ -327,8 +354,20 @@ unsafe fn update(hwnd: HWND) -> bool {
         }
         let added = UI.with(|ui| ui.borrow().as_ref().unwrap().added);
         let ok = Shell_NotifyIconW(if added { NIM_MODIFY } else { NIM_ADD }, &data) != 0;
-        UI.with(|ui| ui.borrow_mut().as_mut().unwrap().added = ok);
+        UI.with(|ui| {
+            let mut ui = ui.borrow_mut();
+            let ui = ui.as_mut().unwrap();
+            ui.added = ok;
+            if ok {
+                ui.last_render = Some(key);
+            }
+        });
         DestroyIcon(icon);
+        if ok {
+            // Icon creation loads comparatively large font/GDI pages. The tray
+            // is idle almost all the time, so return those pages to Windows.
+            crate::memory::current_process();
+        }
         ok
     }
 }
@@ -373,7 +412,12 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, w: WPARAM, l: LP
     unsafe {
         let restart = UI.with(|ui| ui.borrow().as_ref().map(|ui| ui.restart));
         if restart == Some(message) && message != 0 {
-            UI.with(|ui| ui.borrow_mut().as_mut().unwrap().added = false);
+            UI.with(|ui| {
+                let mut ui = ui.borrow_mut();
+                let ui = ui.as_mut().unwrap();
+                ui.added = false;
+                ui.last_render = None;
+            });
             update(hwnd);
             return 0;
         }
