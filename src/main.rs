@@ -32,7 +32,8 @@ fn main() {
 
 fn run() -> Result<(), String> {
     if option_env!("STARTCHATGPT_SPLASH_PREVIEW").is_some() {
-        let mut splash = splash::Splash::new().ok_or("无法创建 Loading 预览窗口")?;
+        let mut splash = splash::Splash::new(&config::ProxySetting::default())
+            .ok_or("无法创建 Loading 预览窗口")?;
         let started = Instant::now();
         while started.elapsed() < Duration::from_secs(8) {
             splash.pump();
@@ -63,7 +64,7 @@ fn run() -> Result<(), String> {
         .parent()
         .ok_or_else(|| format!("无效的 ChatGPT 路径：{}", exe.display()))?;
 
-    let mut splash = splash::Splash::new();
+    let mut splash = splash::Splash::new(&proxy_setting);
     let mut command = Command::new(&exe);
     if let Some(argument) = proxy_setting.launch_argument() {
         command.arg(argument);

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::ffi::{OsStr, c_void};
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStrExt;
@@ -55,6 +56,11 @@ const DWMWCP_ROUND: Dword = 2;
 const DWMWA_COLOR_NONE: Dword = 0xffff_fffe;
 
 static PHASE: AtomicUsize = AtomicUsize::new(0);
+
+thread_local! {
+    // The splash and its paint callbacks run on the same UI thread.
+    static CONNECTION_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -315,7 +321,13 @@ unsafe fn enable_dwm_rounding(hwnd: Hwnd) -> bool {
 }
 
 impl Splash {
-    pub fn new() -> Option<Self> {
+    pub fn new(proxy_setting: &crate::config::ProxySetting) -> Option<Self> {
+        CONNECTION_TEXT.with(|text| {
+            *text.borrow_mut() = match proxy_setting.proxy_url() {
+                Some(url) => format!("正在通过代理连接  {url}"),
+                None => "正在直接连接".into(),
+            };
+        });
         unsafe {
             // The splash runs in a separate launcher process from the settings window.
             // System DPI awareness keeps text crisp without constructing a raw DPI
@@ -487,15 +499,17 @@ unsafe fn paint(hwnd: Hwnd) {
             width,
         );
         draw_spinner(buffer, dpi, width);
-        draw_centered_text(
-            buffer,
-            "正在连接本地代理  127.0.0.1:10808",
-            scale(215, dpi),
-            scale(14, dpi),
-            400,
-            rgb(174, 184, 193),
-            width,
-        );
+        CONNECTION_TEXT.with(|text| {
+            draw_centered_text(
+                buffer,
+                &text.borrow(),
+                scale(215, dpi),
+                scale(14, dpi),
+                400,
+                rgb(174, 184, 193),
+                width,
+            );
+        });
 
         BitBlt(target, 0, 0, width, height, buffer, 0, 0, SRCCOPY);
         SelectObject(buffer, old_bitmap);
