@@ -14,6 +14,9 @@ use std::os::windows::process::CommandExt;
 mod config;
 mod settings;
 mod splash;
+mod usage;
+mod usage_tray;
+mod usage_widget;
 
 const PACKAGE_PREFIX: &str = "OpenAI.Codex_";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -25,12 +28,24 @@ struct LaunchOptions {
 }
 
 fn main() {
+    // Set awareness before the splash, settings, or hidden tray window is created.
+    unsafe {
+        windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+            windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        );
+    }
     if let Err(message) = run() {
         show_error(&message);
     }
 }
 
 fn run() -> Result<(), String> {
+    if env::args_os().any(|arg| arg == "--usage-widget") {
+        return usage_widget::run(&find_chatgpt()?, config::load()?);
+    }
+    if env::args_os().any(|arg| arg == "--usage-only") {
+        return usage_tray::run(&find_chatgpt()?, config::load()?);
+    }
     if option_env!("STARTCHATGPT_SPLASH_PREVIEW").is_some() {
         let mut splash = splash::Splash::new(&config::ProxySetting::default())
             .ok_or("无法创建 Loading 预览窗口")?;
@@ -76,7 +91,7 @@ fn run() -> Result<(), String> {
         .map_err(|error| format!("启动 {} 失败：{error}", exe.display()))?;
 
     if splash.is_none() {
-        return Ok(());
+        return usage_tray::run(&exe, proxy_setting);
     }
 
     let started = Instant::now();
@@ -87,7 +102,8 @@ fn run() -> Result<(), String> {
         }
 
         if started.elapsed() >= Duration::from_millis(500) && splash::has_visible_window_for(&exe) {
-            return Ok(());
+            drop(splash);
+            return usage_tray::run(&exe, proxy_setting);
         }
 
         if let Ok(Some(status)) = child.try_wait()
