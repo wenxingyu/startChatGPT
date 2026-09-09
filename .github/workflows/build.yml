@@ -20,6 +20,16 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Verify tag matches package version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $expectedTag = "v$($metadata.packages[0].version)"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match Cargo package version $expectedTag"
+          }
+
       - name: Run tests
         run: cargo test --release --locked
 
@@ -32,3 +42,38 @@ jobs:
           name: startChatGPT-windows-x64-unsigned
           path: target/release/startChatGPT.exe
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows executable
+        uses: actions/download-artifact@v4
+        with:
+          name: startChatGPT-windows-x64-unsigned
+          path: release
+
+      - name: Generate SHA-256 checksum
+        working-directory: release
+        run: sha256sum startChatGPT.exe > SHA256SUMS.txt
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              release/startChatGPT.exe release/SHA256SUMS.txt \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              release/startChatGPT.exe release/SHA256SUMS.txt \
+              --verify-tag --generate-notes \
+              --title "startChatGPT $GITHUB_REF_NAME" \
+              --notes "附件为 GitHub Actions 构建的未签名 Windows x64 可执行文件。" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
