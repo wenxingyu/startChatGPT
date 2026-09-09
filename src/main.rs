@@ -45,7 +45,7 @@ fn run() -> Result<(), String> {
         return usage_widget::run(&find_chatgpt()?, config::load()?);
     }
     if env::args_os().any(|arg| arg == "--usage-only") {
-        return usage_tray::run(&find_chatgpt()?, config::load()?);
+        return usage_tray::run(&find_chatgpt()?, config::load()?, false);
     }
     if option_env!("STARTCHATGPT_SPLASH_PREVIEW").is_some() {
         let mut splash = splash::Splash::new(&config::ProxySetting::default())
@@ -92,7 +92,7 @@ fn run() -> Result<(), String> {
         .map_err(|error| format!("启动 {} 失败：{error}", exe.display()))?;
 
     if splash.is_none() {
-        return usage_tray::run(&exe, proxy_setting);
+        return usage_tray::run(&exe, proxy_setting, true);
     }
 
     let started = Instant::now();
@@ -104,7 +104,7 @@ fn run() -> Result<(), String> {
 
         if started.elapsed() >= Duration::from_millis(500) && splash::has_visible_window_for(&exe) {
             drop(splash);
-            return usage_tray::run(&exe, proxy_setting);
+            return usage_tray::run(&exe, proxy_setting, true);
         }
 
         if let Ok(Some(status)) = child.try_wait()

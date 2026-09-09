@@ -3,7 +3,7 @@ use crate::{config::ProxySetting, usage};
 use std::{
     cell::RefCell,
     mem::{size_of, zeroed},
-    path::Path,
+    path::{Path, PathBuf},
     ptr::{null, null_mut},
     sync::{Arc, Mutex, mpsc::Sender},
 };
@@ -22,6 +22,8 @@ struct Ui {
     restart: u32,
     details_open: bool,
     last_render: Option<RenderKey>,
+    app: Option<PathBuf>,
+    missing_checks: u8,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -35,7 +37,7 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
 
-pub fn run(app: &Path, proxy: ProxySetting) -> Result<(), String> {
+pub fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), String> {
     unsafe {
         let class = wide("StartChatGPTQuotaTray");
         if !FindWindowW(class.as_ptr(), null()).is_null() {
@@ -61,6 +63,8 @@ pub fn run(app: &Path, proxy: ProxySetting) -> Result<(), String> {
                 restart: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
                 details_open: false,
                 last_render: None,
+                app: exit_with_app.then(|| app.to_owned()),
+                missing_checks: 0,
             })
         });
         let hwnd = CreateWindowExW(
@@ -422,7 +426,30 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, w: WPARAM, l: LP
             return 0;
         }
         match message {
-            WM_TIMER | WM_DPICHANGED | WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
+            WM_TIMER => {
+                let should_exit = UI.with(|ui| {
+                    let mut ui = ui.borrow_mut();
+                    let ui = ui.as_mut().unwrap();
+                    let Some(app) = ui.app.as_ref() else {
+                        return false;
+                    };
+                    if crate::splash::has_process_for(app) {
+                        ui.missing_checks = 0;
+                    } else {
+                        ui.missing_checks = ui.missing_checks.saturating_add(1);
+                    }
+                    // Two consecutive misses avoid closing on a transient process
+                    // enumeration failure during an app update or restart.
+                    ui.missing_checks >= 2
+                });
+                if should_exit {
+                    DestroyWindow(hwnd);
+                } else {
+                    update(hwnd);
+                }
+                0
+            }
+            WM_DPICHANGED | WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
                 update(hwnd);
                 0
             }

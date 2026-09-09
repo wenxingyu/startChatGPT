@@ -45,7 +45,8 @@ PATH 中的 `codex.exe` 和桌面端附带的 CLI，也可通过 `STARTCHATGPT_C
 .\startChatGPT.exe --usage-only
 ```
 
-退出额度显示不会关闭 Codex；关闭 Codex 后额度显示继续运行，可从右键菜单退出。
+退出额度显示不会关闭 Codex；通过本启动器打开 Codex 时，关闭 Codex 后额度显示也会自动退出。
+使用 `--usage-only` 独立打开的额度托盘仍会持续运行，可从右键菜单退出。
 
 ![startChatGPT Splash 启动画面](assets/splash.png)
 

@@ -283,6 +283,11 @@ unsafe extern "system" {
     fn CloseHandle(handle: Handle) -> Bool;
 }
 
+#[link(name = "psapi")]
+unsafe extern "system" {
+    fn EnumProcesses(process_ids: *mut Dword, bytes: Dword, bytes_returned: *mut Dword) -> Bool;
+}
+
 pub struct Splash {
     hwnd: Hwnd,
 }
@@ -665,6 +670,61 @@ pub fn has_visible_window_for(executable: &Path) -> bool {
     search.found
 }
 
+/// Returns whether a running process has this exact executable path.
+///
+/// Unlike `has_visible_window_for`, this remains true while ChatGPT is
+/// minimized or has no top-level window, so it is suitable for tying the
+/// launcher's tray lifetime to the application process.
+pub fn has_process_for(executable: &Path) -> bool {
+    let target = executable
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_lowercase();
+    let mut process_ids = vec![0u32; 1024];
+    loop {
+        let mut bytes_returned = 0;
+        let capacity_bytes = (process_ids.len() * size_of::<Dword>()) as Dword;
+        let success = unsafe {
+            EnumProcesses(
+                process_ids.as_mut_ptr(),
+                capacity_bytes,
+                &mut bytes_returned,
+            )
+        };
+        if success == 0 {
+            return false;
+        }
+        if bytes_returned < capacity_bytes {
+            process_ids.truncate(bytes_returned as usize / size_of::<Dword>());
+            break;
+        }
+        process_ids.resize(process_ids.len() * 2, 0);
+    }
+
+    let mut path = vec![0u16; 32_768];
+    for process_id in process_ids {
+        if process_id == 0 {
+            continue;
+        }
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+        if process.is_null() {
+            continue;
+        }
+        let mut length = path.len() as Dword;
+        let success = unsafe {
+            let success = QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut length);
+            CloseHandle(process);
+            success
+        };
+        if success != 0
+            && String::from_utf16_lossy(&path[..length as usize]).to_lowercase() == target
+        {
+            return true;
+        }
+    }
+    false
+}
+
 struct WindowSearch {
     target: String,
     found: bool,
@@ -722,4 +782,14 @@ fn scale(value: i32, dpi: Uint) -> i32 {
 
 fn wide(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_current_process_by_exact_executable_path() {
+        assert!(has_process_for(&std::env::current_exe().unwrap()));
+    }
 }

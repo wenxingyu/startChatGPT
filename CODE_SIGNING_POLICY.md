@@ -37,4 +37,5 @@ Starting the launcher also starts an account quota monitor. It uses the locally
 installed and authenticated Codex CLI to request quota information from Codex
 services every 45 seconds using the selected proxy. It does not start model
 conversations or copy or log login tokens. The monitor remains active until
-the user exits it from its tray menu.
+ChatGPT exits or the user exits it from its tray menu. When started separately
+with `--usage-only`, the monitor remains active until the user exits it.
