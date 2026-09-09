@@ -48,7 +48,7 @@ pub fn run(app: &Path, proxy: ProxySetting) -> Result<(), String> {
         }
         let scale = GetDpiForSystem() as f64 / 96.0;
         let state = Arc::new(Mutex::new(usage::State::default()));
-        let (action, worker) = usage::start(app.to_owned(), proxy, state.clone());
+        let (action, worker) = usage::start(app.to_owned(), proxy, state.clone(), None);
         UI.with(|ui| {
             *ui.borrow_mut() = Some(Ui {
                 state,

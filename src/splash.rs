@@ -49,6 +49,8 @@ const GRADIENT_FILL_RECT_H: Dword = 0;
 const GRADIENT_FILL_RECT_V: Dword = 1;
 const GW_OWNER: Uint = 4;
 const PROCESS_QUERY_LIMITED_INFORMATION: Dword = 0x1000;
+const SYNCHRONIZE: Dword = 0x0010_0000;
+const INFINITE: Dword = 0xffff_ffff;
 const DWMWA_USE_IMMERSIVE_DARK_MODE: Dword = 20;
 const DWMWA_WINDOW_CORNER_PREFERENCE: Dword = 33;
 const DWMWA_BORDER_COLOR: Dword = 34;
@@ -281,6 +283,7 @@ unsafe extern "system" {
         size: *mut Dword,
     ) -> Bool;
     fn CloseHandle(handle: Handle) -> Bool;
+    fn WaitForSingleObject(handle: Handle, milliseconds: Dword) -> Dword;
 }
 
 #[link(name = "psapi")]
@@ -670,12 +673,30 @@ pub fn has_visible_window_for(executable: &Path) -> bool {
     search.found
 }
 
-/// Returns whether a running process has this exact executable path.
-///
-/// Unlike `has_visible_window_for`, this remains true while ChatGPT is
-/// minimized or has no top-level window, so it is suitable for tying the
-/// launcher's tray lifetime to the application process.
-pub fn has_process_for(executable: &Path) -> bool {
+/// An owned handle that can sleep until a matching process exits.
+pub struct ProcessWait(Handle);
+
+// Windows process handles may be waited on from any thread.
+unsafe impl Send for ProcessWait {}
+
+impl ProcessWait {
+    pub fn wait(self) {
+        unsafe {
+            WaitForSingleObject(self.0, INFINITE);
+        }
+    }
+}
+
+impl Drop for ProcessWait {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.0);
+        }
+    }
+}
+
+/// Finds a process with this exact executable path and returns a waitable handle.
+pub fn process_wait_for(executable: &Path) -> Option<ProcessWait> {
     let target = executable
         .to_string_lossy()
         .replace('/', "\\")
@@ -692,7 +713,7 @@ pub fn has_process_for(executable: &Path) -> bool {
             )
         };
         if success == 0 {
-            return false;
+            return None;
         }
         if bytes_returned < capacity_bytes {
             process_ids.truncate(bytes_returned as usize / size_of::<Dword>());
@@ -706,23 +727,27 @@ pub fn has_process_for(executable: &Path) -> bool {
         if process_id == 0 {
             continue;
         }
-        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+        let process = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                0,
+                process_id,
+            )
+        };
         if process.is_null() {
             continue;
         }
         let mut length = path.len() as Dword;
-        let success = unsafe {
-            let success = QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut length);
-            CloseHandle(process);
-            success
-        };
+        let success =
+            unsafe { QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut length) };
         if success != 0
             && String::from_utf16_lossy(&path[..length as usize]).to_lowercase() == target
         {
-            return true;
+            return Some(ProcessWait(process));
         }
+        unsafe { CloseHandle(process) };
     }
-    false
+    None
 }
 
 struct WindowSearch {
@@ -790,6 +815,6 @@ mod tests {
 
     #[test]
     fn detects_current_process_by_exact_executable_path() {
-        assert!(has_process_for(&std::env::current_exe().unwrap()));
+        assert!(process_wait_for(&std::env::current_exe().unwrap()).is_some());
     }
 }

@@ -8,6 +8,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
+use windows_sys::Win32::{Foundation::HWND, UI::WindowsAndMessaging::PostMessageW};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window {
@@ -236,6 +237,7 @@ pub fn start(
     app: PathBuf,
     proxy: ProxySetting,
     state: Arc<Mutex<State>>,
+    notify: Option<(usize, u32)>,
 ) -> (mpsc::Sender<Action>, thread::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel();
     let worker = thread::spawn(move || {
@@ -263,6 +265,11 @@ pub fn start(
                         state.error = Some(error);
                         bridge = None;
                     }
+                }
+            }
+            if let Some((hwnd, message)) = notify {
+                unsafe {
+                    PostMessageW(hwnd as HWND, message, 0, 0);
                 }
             }
             match rx.recv_timeout(Duration::from_secs(45)) {

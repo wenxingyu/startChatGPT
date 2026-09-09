@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     ptr::{null, null_mut},
     sync::{Arc, Mutex, mpsc::Sender},
+    thread,
 };
 use windows_sys::Win32::{
     Foundation::*,
@@ -15,6 +16,9 @@ use windows_sys::Win32::{
 };
 
 const CALLBACK: u32 = WM_APP + 20;
+const USAGE_UPDATED: u32 = WM_APP + 21;
+const APP_EXITED: u32 = WM_APP + 22;
+const EXIT_RECHECK_TIMER: usize = 2;
 struct Ui {
     state: Arc<Mutex<usage::State>>,
     action: Sender<usage::Action>,
@@ -23,7 +27,7 @@ struct Ui {
     details_open: bool,
     last_render: Option<RenderKey>,
     app: Option<PathBuf>,
-    missing_checks: u8,
+    watching_app: bool,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -53,20 +57,6 @@ pub fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), S
         if RegisterClassW(&wc) == 0 {
             return Err("无法注册托盘窗口".into());
         }
-        let state = Arc::new(Mutex::new(usage::State::default()));
-        let (action, worker) = usage::start(app.to_owned(), proxy, state.clone());
-        UI.with(|ui| {
-            *ui.borrow_mut() = Some(Ui {
-                state,
-                action: action.clone(),
-                added: false,
-                restart: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
-                details_open: false,
-                last_render: None,
-                app: exit_with_app.then(|| app.to_owned()),
-                missing_checks: 0,
-            })
-        });
         let hwnd = CreateWindowExW(
             WS_EX_TOOLWINDOW,
             class.as_ptr(),
@@ -81,11 +71,36 @@ pub fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), S
             instance,
             null(),
         );
+        let state = Arc::new(Mutex::new(usage::State::default()));
+        let mut action = None;
+        let mut worker = None;
         let mut success = false;
         if !hwnd.is_null() {
+            let (worker_action, worker_handle) = usage::start(
+                app.to_owned(),
+                proxy,
+                state.clone(),
+                Some((hwnd as usize, USAGE_UPDATED)),
+            );
+            UI.with(|ui| {
+                *ui.borrow_mut() = Some(Ui {
+                    state,
+                    action: worker_action.clone(),
+                    added: false,
+                    restart: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
+                    details_open: false,
+                    last_render: None,
+                    app: exit_with_app.then(|| app.to_owned()),
+                    watching_app: false,
+                })
+            });
+            action = Some(worker_action);
+            worker = Some(worker_handle);
             success = update(hwnd);
             if success {
-                SetTimer(hwnd, 1, 3000, None);
+                if !arm_app_watch(hwnd) {
+                    DestroyWindow(hwnd);
+                }
                 let mut msg: MSG = zeroed();
                 while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
                     TranslateMessage(&msg);
@@ -95,8 +110,12 @@ pub fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), S
                 DestroyWindow(hwnd);
             }
         }
-        let _ = action.send(usage::Action::Stop);
-        let _ = worker.join();
+        if let Some(action) = action {
+            let _ = action.send(usage::Action::Stop);
+        }
+        if let Some(worker) = worker {
+            let _ = worker.join();
+        }
         UI.with(|ui| *ui.borrow_mut() = None);
         if success {
             Ok(())
@@ -104,6 +123,38 @@ pub fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), S
             Err("无法添加 Codex 系统托盘图标".into())
         }
     }
+}
+
+fn arm_app_watch(hwnd: HWND) -> bool {
+    let wait = UI.with(|ui| {
+        let mut ui = ui.borrow_mut();
+        let ui = ui.as_mut()?;
+        let Some(app) = ui.app.as_ref() else {
+            return Some(None);
+        };
+        if ui.watching_app {
+            return Some(None);
+        }
+        let wait = crate::splash::process_wait_for(app);
+        if wait.is_some() {
+            ui.watching_app = true;
+        }
+        Some(wait)
+    });
+    let Some(wait) = wait else {
+        return false;
+    };
+    let Some(wait) = wait else {
+        return true;
+    };
+    let window = hwnd as usize;
+    thread::spawn(move || {
+        wait.wait();
+        unsafe {
+            PostMessageW(window as HWND, APP_EXITED, 0, 0);
+        }
+    });
+    true
 }
 
 fn icon_text(state: &usage::State) -> String {
@@ -426,26 +477,27 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, w: WPARAM, l: LP
             return 0;
         }
         match message {
-            WM_TIMER => {
-                let should_exit = UI.with(|ui| {
-                    let mut ui = ui.borrow_mut();
-                    let ui = ui.as_mut().unwrap();
-                    let Some(app) = ui.app.as_ref() else {
-                        return false;
-                    };
-                    if crate::splash::has_process_for(app) {
-                        ui.missing_checks = 0;
-                    } else {
-                        ui.missing_checks = ui.missing_checks.saturating_add(1);
+            USAGE_UPDATED => {
+                update(hwnd);
+                0
+            }
+            APP_EXITED => {
+                UI.with(|ui| {
+                    if let Some(ui) = ui.borrow_mut().as_mut() {
+                        ui.watching_app = false;
                     }
-                    // Two consecutive misses avoid closing on a transient process
-                    // enumeration failure during an app update or restart.
-                    ui.missing_checks >= 2
                 });
-                if should_exit {
-                    DestroyWindow(hwnd);
-                } else {
-                    update(hwnd);
+                // Give an app update or automatic restart a brief opportunity
+                // to replace the process before closing the tray.
+                SetTimer(hwnd, EXIT_RECHECK_TIMER, 1500, None);
+                0
+            }
+            WM_TIMER => {
+                if w == EXIT_RECHECK_TIMER {
+                    KillTimer(hwnd, EXIT_RECHECK_TIMER);
+                    if !arm_app_watch(hwnd) {
+                        DestroyWindow(hwnd);
+                    }
                 }
                 0
             }
@@ -502,7 +554,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, w: WPARAM, l: LP
                 data.hWnd = hwnd;
                 data.uID = 1;
                 Shell_NotifyIconW(NIM_DELETE, &data);
-                KillTimer(hwnd, 1);
+                KillTimer(hwnd, EXIT_RECHECK_TIMER);
                 PostQuitMessage(0);
                 0
             }
