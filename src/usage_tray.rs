@@ -126,26 +126,34 @@ pub fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), S
 }
 
 fn arm_app_watch(hwnd: HWND) -> bool {
-    let wait = UI.with(|ui| {
+    enum WatchSetup {
+        NotRequired,
+        AppMissing,
+        Armed(crate::splash::ProcessWait),
+    }
+
+    let setup = UI.with(|ui| {
         let mut ui = ui.borrow_mut();
-        let ui = ui.as_mut()?;
+        let Some(ui) = ui.as_mut() else {
+            return WatchSetup::AppMissing;
+        };
         let Some(app) = ui.app.as_ref() else {
-            return Some(None);
+            return WatchSetup::NotRequired;
         };
         if ui.watching_app {
-            return Some(None);
+            return WatchSetup::NotRequired;
         }
-        let wait = crate::splash::process_wait_for(app);
-        if wait.is_some() {
-            ui.watching_app = true;
-        }
-        Some(wait)
+        let Some(wait) = crate::splash::process_wait_for(app) else {
+            return WatchSetup::AppMissing;
+        };
+        ui.watching_app = true;
+        WatchSetup::Armed(wait)
     });
-    let Some(wait) = wait else {
-        return false;
-    };
-    let Some(wait) = wait else {
-        return true;
+
+    let wait = match setup {
+        WatchSetup::NotRequired => return true,
+        WatchSetup::AppMissing => return false,
+        WatchSetup::Armed(wait) => wait,
     };
     let window = hwnd as usize;
     thread::spawn(move || {
