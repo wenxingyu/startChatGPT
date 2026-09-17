@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "start-chat-gpt"
-version = "1.2.5"
+version = "1.2.6"
 dependencies = [
  "serde_json",
  "windows-sys",

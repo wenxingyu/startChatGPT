@@ -95,7 +95,9 @@ impl Drop for Bridge {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        if let Some(reader) = self.reader.take() {
+        // A descendant can keep stdout open after the app-server exits. Never
+        // wait indefinitely for that pipe: dropping the handle detaches it.
+        if let Some(reader) = self.reader.take().filter(|reader| reader.is_finished()) {
             let _ = reader.join();
         }
     }
@@ -239,13 +241,21 @@ pub fn start(
     state: Arc<Mutex<State>>,
     notify: Option<(usize, u32)>,
 ) -> (mpsc::Sender<Action>, thread::JoinHandle<()>) {
+    start_with_connector(move || Bridge::connect(&app, &proxy), state, notify)
+}
+
+fn start_with_connector(
+    mut connect: impl FnMut() -> Result<Bridge, String> + Send + 'static,
+    state: Arc<Mutex<State>>,
+    notify: Option<(usize, u32)>,
+) -> (mpsc::Sender<Action>, thread::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel();
     let worker = thread::spawn(move || {
         let mut bridge = None;
         loop {
             let result = (|| {
                 if bridge.is_none() {
-                    bridge = Some(Bridge::connect(&app, &proxy)?);
+                    bridge = Some(connect()?);
                 }
                 let result = bridge
                     .as_mut()
@@ -253,6 +263,7 @@ pub fn start(
                     .request("account/rateLimits/read", None)?;
                 parse(&result)
             })();
+            let failed = result.is_err();
             {
                 let mut state = state.lock().unwrap();
                 match result {
@@ -263,7 +274,6 @@ pub fn start(
                     }
                     Err(error) => {
                         state.error = Some(error);
-                        bridge = None;
                     }
                 }
             }
@@ -271,6 +281,11 @@ pub fn start(
                 unsafe {
                     PostMessageW(hwnd as HWND, message, 0, 0);
                 }
+            }
+            // Process cleanup can block. Publish the error and release the UI's
+            // state lock first, so details and the tray menu stay responsive.
+            if failed {
+                bridge = None;
             }
             match rx.recv_timeout(Duration::from_secs(45)) {
                 Ok(Action::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -284,6 +299,10 @@ pub fn start(
     });
     (tx, worker)
 }
+
+#[cfg(test)]
+#[path = "usage_recovery_tests.rs"]
+mod recovery_tests;
 
 #[cfg(test)]
 mod tests {
