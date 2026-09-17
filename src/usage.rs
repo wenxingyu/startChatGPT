@@ -1,14 +1,18 @@
 //! Read account quota through the local Codex app-server. Never start a model turn.
 use crate::config::ProxySetting;
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
-use windows_sys::Win32::{Foundation::HWND, UI::WindowsAndMessaging::PostMessageW};
+use windows_sys::Win32::{
+    Foundation::HWND, System::IO::CancelSynchronousIo, UI::WindowsAndMessaging::PostMessageW,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window {
@@ -83,23 +87,104 @@ pub fn parse(value: &Value) -> Result<[Option<Window>; 2], String> {
     Ok(windows)
 }
 
+struct MessageReader {
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl MessageReader {
+    fn spawn(mut output: ChildStdout) -> (Self, mpsc::Receiver<Value>) {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        let (tx, messages) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            let mut pending = Vec::new();
+            let mut buffer = [0u8; 4096];
+            while !stopping.load(Ordering::Acquire) {
+                // Read directly so cancellation returns to our stop check even
+                // if Windows reports it as an Interrupted I/O error.
+                let count = match output.read(&mut buffer) {
+                    Ok(0) => {
+                        if !stopping.load(Ordering::Acquire)
+                            && let Ok(value) = serde_json::from_slice(&pending)
+                        {
+                            let _ = tx.send(value);
+                        }
+                        break;
+                    }
+                    Ok(count) => count,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                };
+                if stopping.load(Ordering::Acquire) {
+                    break;
+                }
+                pending.extend_from_slice(&buffer[..count]);
+                let mut consumed = 0;
+                while let Some(end) = pending[consumed..].iter().position(|byte| *byte == b'\n') {
+                    let next = consumed + end + 1;
+                    if let Ok(value) = serde_json::from_slice(&pending[consumed..next])
+                        && tx.send(value).is_err()
+                    {
+                        return;
+                    }
+                    consumed = next;
+                }
+                pending.drain(..consumed);
+            }
+        });
+        (
+            Self {
+                stop,
+                handle: Some(handle),
+            },
+            messages,
+        )
+    }
+
+    fn shutdown(&mut self) -> bool {
+        self.stop.store(true, Ordering::Release);
+        let Some(handle) = self.handle.as_ref() else {
+            return true;
+        };
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while !handle.is_finished() && Instant::now() < deadline {
+            // Retry during shutdown only: the first cancellation can race with
+            // the reader entering ReadFile. The handle stays owned and valid.
+            unsafe {
+                CancelSynchronousIo(handle.as_raw_handle().cast());
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        if handle.is_finished() {
+            let _ = self.handle.take().unwrap().join();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Drop for MessageReader {
+    fn drop(&mut self) {
+        // A driver may not honor cancellation. Bound the wait in that case.
+        self.shutdown();
+    }
+}
+
 struct Bridge {
     child: Child,
     input: ChildStdin,
     messages: mpsc::Receiver<Value>,
-    reader: Option<thread::JoinHandle<()>>,
+    reader: MessageReader,
     next_id: u64,
 }
 
 impl Drop for Bridge {
     fn drop(&mut self) {
+        self.reader.shutdown();
         let _ = self.child.kill();
         let _ = self.child.wait();
-        // A descendant can keep stdout open after the app-server exits. Never
-        // wait indefinitely for that pipe: dropping the handle detaches it.
-        if let Some(reader) = self.reader.take().filter(|reader| reader.is_finished()) {
-            let _ = reader.join();
-        }
     }
 }
 
@@ -162,24 +247,12 @@ impl Bridge {
             };
             let input = child.stdin.take().expect("piped stdin");
             let output = child.stdout.take().expect("piped stdout");
-            let (tx, messages) = mpsc::channel();
-            let reader = thread::spawn(move || {
-                for line in BufReader::new(output).lines() {
-                    let Ok(line) = line else {
-                        break;
-                    };
-                    if let Ok(value) = serde_json::from_str(&line)
-                        && tx.send(value).is_err()
-                    {
-                        break;
-                    }
-                }
-            });
+            let (reader, messages) = MessageReader::spawn(output);
             let mut bridge = Self {
                 child,
                 input,
                 messages,
-                reader: Some(reader),
+                reader,
                 next_id: 1,
             };
             bridge.request("initialize", Some(json!({"clientInfo": {

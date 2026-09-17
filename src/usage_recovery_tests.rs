@@ -1,5 +1,6 @@
 //! Fault injection with real child processes and pipes; no account or network access.
 use super::*;
+use std::io::BufRead;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn mock_command(mode: &str, release: &Path) -> Command {
@@ -24,6 +25,20 @@ fn mock_server() {
         return;
     };
     let release = PathBuf::from(std::env::var_os("QUOTA_TEST_RELEASE").unwrap());
+    if mode == "frames" {
+        let payload = format!(
+            "{}\r\n{}",
+            json!({"text": "额度".repeat(3000)}),
+            json!({"last": true})
+        );
+        let mut output = std::io::stdout().lock();
+        for chunk in payload.as_bytes().chunks(127) {
+            output.write_all(chunk).unwrap();
+            output.flush().unwrap();
+        }
+        // Do not let the test harness append text after our unterminated frame.
+        std::process::exit(0);
+    }
     if mode == "hold-pipe" {
         let deadline = Instant::now() + Duration::from_secs(30);
         while !release.exists() && Instant::now() < deadline {
@@ -75,22 +90,12 @@ fn mock_bridge(mode: &str, release: &Path) -> Result<Bridge, String> {
         .map_err(|error| error.to_string())?;
     let input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
-    let (tx, messages) = mpsc::channel();
-    let reader = thread::spawn(move || {
-        for line in BufReader::new(output).lines() {
-            let Ok(line) = line else { break };
-            if let Ok(value) = serde_json::from_str(&line)
-                && tx.send(value).is_err()
-            {
-                break;
-            }
-        }
-    });
+    let (reader, messages) = MessageReader::spawn(output);
     Ok(Bridge {
         child,
         input,
         messages,
-        reader: Some(reader),
+        reader,
         next_id: 1,
     })
 }
@@ -189,4 +194,55 @@ fn inherited_stdout_does_not_freeze_state_or_reconnect() {
 #[test]
 fn failed_connection_automatically_recovers_without_clicking_refresh() {
     verify_recovery("held-pipe", false);
+}
+
+#[test]
+fn reader_recovers_split_unicode_frames_and_final_line_without_newline() {
+    let bridge = mock_bridge("frames", Path::new("unused")).unwrap();
+    assert_eq!(
+        bridge
+            .messages
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap(),
+        json!({"text": "额度".repeat(3000)})
+    );
+    assert_eq!(
+        bridge
+            .messages
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap(),
+        json!({"last": true})
+    );
+}
+
+#[test]
+fn reader_can_be_cancelled_immediately_after_spawn() {
+    for _ in 0..10 {
+        let mut bridge = mock_bridge("healthy", Path::new("unused")).unwrap();
+        assert!(bridge.reader.shutdown());
+        assert!(bridge.reader.handle.is_none());
+    }
+}
+
+#[test]
+fn reader_is_reclaimed_while_descendant_still_holds_stdout() {
+    let release = std::env::temp_dir().join(format!(
+        "quota-reader-cancel-{}.release",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&release);
+    let mut bridge = mock_bridge("held-pipe", &release).unwrap();
+    let result = (|| {
+        bridge.request("account/rateLimits/read", None)?;
+        if bridge.request("account/rateLimits/read", None).is_ok() {
+            return Err("fixture did not inject the error".to_string());
+        }
+        if !bridge.reader.shutdown() || bridge.reader.handle.is_some() {
+            return Err("reader survived cancellation while stdout remained open".into());
+        }
+        Ok(())
+    })();
+    std::fs::write(&release, b"release").unwrap();
+    drop(bridge);
+    assert!(result.is_ok(), "{result:?}");
 }
