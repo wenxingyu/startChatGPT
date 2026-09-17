@@ -43,3 +43,55 @@ New-Item -ItemType Directory -Path diagnostics/pe-output -Force | Out-Null
 @{ Published=$published; Rebuilt=$rebuilt; Comparison=@($comparison) } |
     ConvertTo-Json -Depth 8 | Set-Content diagnostics/pe-output/sections.json
 $comparison | Format-Table -AutoSize
+
+function Debug-Records([byte[]]$Bytes) {
+    $pe = [BitConverter]::ToInt32($Bytes, 0x3c)
+    $optional = $pe + 24
+    if ([BitConverter]::ToUInt16($Bytes, $optional) -ne 0x20b) { throw 'Expected PE32+' }
+    $directoryRva = [BitConverter]::ToUInt32($Bytes, $optional + 112 + 6 * 8)
+    $directorySize = [BitConverter]::ToUInt32($Bytes, $optional + 116 + 6 * 8)
+    $sectionCount = [BitConverter]::ToUInt16($Bytes, $pe + 6)
+    $optionalSize = [BitConverter]::ToUInt16($Bytes, $pe + 20)
+    for ($index = 0; $index -lt $sectionCount; $index++) {
+        $section = $pe + 24 + $optionalSize + 40 * $index
+        $virtualAddress = [BitConverter]::ToUInt32($Bytes, $section + 12)
+        $rawSize = [BitConverter]::ToUInt32($Bytes, $section + 16)
+        if ($directoryRva -ge $virtualAddress -and $directoryRva -lt $virtualAddress + $rawSize) {
+            $raw = [BitConverter]::ToUInt32($Bytes, $section + 20) + $directoryRva - $virtualAddress
+            for ($offset = $raw; $offset -lt $raw + $directorySize; $offset += 28) {
+                [pscustomobject]@{
+                    DirectoryOffset=$offset
+                    Timestamp=[BitConverter]::ToUInt32($Bytes, $offset + 4)
+                    Type=[BitConverter]::ToUInt32($Bytes, $offset + 12)
+                    DataSize=[BitConverter]::ToUInt32($Bytes, $offset + 16)
+                    DataOffset=[BitConverter]::ToUInt32($Bytes, $offset + 24)
+                }
+            }
+        }
+    }
+}
+
+$left = [IO.File]::ReadAllBytes((Resolve-Path $published.Path).Path)
+$right = [IO.File]::ReadAllBytes((Resolve-Path $rebuilt.Path).Path)
+if ($left.Length -ne $right.Length) { throw 'Different binary lengths' }
+$ranges = @()
+$offset = 0
+while ($offset -lt $left.Length) {
+    if ($left[$offset] -eq $right[$offset]) { $offset++; continue }
+    $start = $offset
+    while ($offset -lt $left.Length -and $left[$offset] -ne $right[$offset]) { $offset++ }
+    $length = $offset - $start
+    $ranges += [pscustomobject]@{
+        Offset=$start
+        Length=$length
+        PublishedHex=[Convert]::ToHexString($left, $start, [Math]::Min($length, 64))
+        RebuiltHex=[Convert]::ToHexString($right, $start, [Math]::Min($length, 64))
+    }
+}
+@{
+    DifferenceRanges=$ranges
+    PublishedDebug=@(Debug-Records $left)
+    RebuiltDebug=@(Debug-Records $right)
+    COFFTimestampOffset=([BitConverter]::ToInt32($left, 0x3c) + 8)
+} | ConvertTo-Json -Depth 6 | Set-Content diagnostics/pe-output/differences.json
+$ranges | Format-Table -AutoSize
