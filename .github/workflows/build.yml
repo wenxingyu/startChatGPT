@@ -11,16 +11,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.98.1
-      - name: Build controlled source comparisons
+      - name: Compare existing binaries without executing them
         shell: pwsh
-        run: ./diagnostics/compare-builds.ps1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 35226617381 --repo $env:GITHUB_REPOSITORY --name defender-source-comparison --dir diagnostics/controlled
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download comparison artifacts' }
+          gh release download v1.2.6 --repo $env:GITHUB_REPOSITORY --pattern startChatGPT.exe --dir diagnostics/published
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download published control' }
+          ./diagnostics/compare-pe.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: defender-source-comparison
-          path: diagnostics/output/
+          name: defender-pe-comparison
+          path: diagnostics/pe-output/
           if-no-files-found: error
