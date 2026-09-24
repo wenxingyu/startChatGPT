@@ -280,10 +280,11 @@ unsafe fn make_icon(state: &usage::State, size: i32) -> HICON {
             0x00aadc66
         };
         let value = icon_text(state);
-        // Use a condensed numeral face for three digits, preserving their height
-        // instead of shrinking the entire "100" to fit a proportional UI font.
+        // Keep the same font-size ceiling for every value. Narrow glyphs such as
+        // "1" otherwise grow much larger than wider two-digit values like "80".
+        // Three digits use a condensed face so "100" can share this ceiling.
         let encoded = wide(&value);
-        let mut font_size = size * 3 / 2;
+        let mut font_size = (size - 1).max(5);
         let (font, old_font, ink) = loop {
             let font = CreateFontW(
                 -font_size,
@@ -574,6 +575,75 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, w: WPARAM, l: LP
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    unsafe fn icon_ink_height(remaining: f64, size: i32) -> i32 {
+        unsafe {
+            let state = usage::State {
+                windows: [
+                    Some(usage::Window {
+                        remaining,
+                        minutes: 300,
+                        resets_at: None,
+                    }),
+                    None,
+                ],
+                updated: Some(std::time::Instant::now()),
+                error: None,
+            };
+            let icon = make_icon(&state, size);
+            assert!(!icon.is_null());
+            let mut info: ICONINFO = zeroed();
+            assert_ne!(GetIconInfo(icon, &mut info), 0);
+            let dc = CreateCompatibleDC(null_mut());
+            let mut bitmap_info: BITMAPINFO = zeroed();
+            bitmap_info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+            bitmap_info.bmiHeader.biWidth = size;
+            bitmap_info.bmiHeader.biHeight = -size;
+            bitmap_info.bmiHeader.biPlanes = 1;
+            bitmap_info.bmiHeader.biBitCount = 32;
+            bitmap_info.bmiHeader.biCompression = BI_RGB;
+            let mut pixels = vec![0u32; (size * size) as usize];
+            assert_eq!(
+                GetDIBits(
+                    dc,
+                    info.hbmColor,
+                    0,
+                    size as u32,
+                    pixels.as_mut_ptr().cast(),
+                    &mut bitmap_info,
+                    DIB_RGB_COLORS,
+                ),
+                size
+            );
+            DeleteDC(dc);
+            DeleteObject(info.hbmColor);
+            DeleteObject(info.hbmMask);
+            DestroyIcon(icon);
+            let rows: Vec<_> = pixels
+                .chunks_exact(size as usize)
+                .enumerate()
+                .filter_map(|(y, row)| {
+                    row.iter()
+                        .any(|pixel| pixel & 0x00ff_ffff != 0x001c_1f24)
+                        .then_some(y as i32)
+                })
+                .collect();
+            rows.last().unwrap() - rows.first().unwrap() + 1
+        }
+    }
+
+    #[test]
+    fn two_digit_values_have_consistent_ink_height_at_200_percent_dpi() {
+        unsafe {
+            let heights: Vec<_> = (80..=99)
+                .map(|value| icon_ink_height(value as f64, 32))
+                .collect();
+            assert!(
+                heights.iter().max().unwrap() - heights.iter().min().unwrap() <= 2,
+                "{heights:?}"
+            );
+        }
+    }
 
     #[test]
     fn renders_native_bitmaps_for_common_dpi_scales() {
