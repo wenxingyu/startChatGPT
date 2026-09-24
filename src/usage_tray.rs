@@ -268,7 +268,7 @@ unsafe fn make_icon(state: &usage::State, size: i32) -> HICON {
         }
         let old = SelectObject(dc, bitmap);
         let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, (size * size) as usize);
-        pixels.fill(0xff1c1f24);
+        pixels.fill(0);
         let remaining = state.windows[0].as_ref().map(|w| w.remaining);
         let color = if state.stale() {
             0x00afa39a
@@ -329,7 +329,9 @@ unsafe fn make_icon(state: &usage::State, size: i32) -> HICON {
             font_size -= 1;
         };
         SetBkMode(dc, TRANSPARENT as i32);
-        SetTextColor(dc, color);
+        // Render white onto black to get grayscale glyph coverage. GDI text
+        // output does not populate the DIB's alpha channel itself.
+        SetTextColor(dc, 0x00ff_ffff);
         // Center visible ink rather than the font's line box and unused descender space.
         TextOutW(
             dc,
@@ -340,7 +342,11 @@ unsafe fn make_icon(state: &usage::State, size: i32) -> HICON {
         );
         GdiFlush();
         for pixel in pixels {
-            *pixel |= 0xff000000;
+            let alpha = *pixel & 0xff;
+            let red = (color & 0xff) * alpha / 255;
+            let green = ((color >> 8) & 0xff) * alpha / 255;
+            let blue = ((color >> 16) & 0xff) * alpha / 255;
+            *pixel = (alpha << 24) | (red << 16) | (green << 8) | blue;
         }
         SelectObject(dc, old_font);
         DeleteObject(font);
@@ -576,7 +582,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, w: WPARAM, l: LP
 mod tests {
     use super::*;
 
-    unsafe fn icon_ink_height(remaining: f64, size: i32) -> i32 {
+    unsafe fn icon_pixels(remaining: f64, size: i32) -> Vec<u32> {
         unsafe {
             let state = usage::State {
                 windows: [
@@ -619,16 +625,86 @@ mod tests {
             DeleteObject(info.hbmColor);
             DeleteObject(info.hbmMask);
             DestroyIcon(icon);
-            let rows: Vec<_> = pixels
-                .chunks_exact(size as usize)
-                .enumerate()
-                .filter_map(|(y, row)| {
-                    row.iter()
-                        .any(|pixel| pixel & 0x00ff_ffff != 0x001c_1f24)
-                        .then_some(y as i32)
-                })
-                .collect();
-            rows.last().unwrap() - rows.first().unwrap() + 1
+            pixels
+        }
+    }
+
+    unsafe fn icon_ink_height(remaining: f64, size: i32) -> i32 {
+        let pixels = unsafe { icon_pixels(remaining, size) };
+        let rows: Vec<_> = pixels
+            .chunks_exact(size as usize)
+            .enumerate()
+            .filter_map(|(y, row)| row.iter().any(|pixel| pixel >> 24 != 0).then_some(y as i32))
+            .collect();
+        rows.last().unwrap() - rows.first().unwrap() + 1
+    }
+
+    #[test]
+    fn tray_icon_has_transparent_background_and_antialiased_digits() {
+        unsafe {
+            for size in [16, 32, 48] {
+                let pixels = icon_pixels(91.0, size);
+                assert_eq!(pixels[0], 0);
+                assert!(pixels.iter().any(|pixel| *pixel == 0xff66_dcaa));
+                assert!(pixels.iter().any(|pixel| (1..255).contains(&(pixel >> 24))));
+                for pixel in pixels {
+                    let alpha = pixel >> 24;
+                    assert!(pixel >> 16 & 0xff <= alpha);
+                    assert!(pixel >> 8 & 0xff <= alpha);
+                    assert!(pixel & 0xff <= alpha);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tray_icon_blends_over_light_and_dark_backgrounds() {
+        unsafe {
+            let state = usage::State {
+                windows: [
+                    Some(usage::Window {
+                        remaining: 91.0,
+                        minutes: 300,
+                        resets_at: None,
+                    }),
+                    None,
+                ],
+                updated: Some(std::time::Instant::now()),
+                error: None,
+            };
+            let size = 32;
+            let icon = make_icon(&state, size);
+            assert!(!icon.is_null());
+            let dc = CreateCompatibleDC(null_mut());
+            let mut info: BITMAPINFO = zeroed();
+            info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+            info.bmiHeader.biWidth = size;
+            info.bmiHeader.biHeight = -size;
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            let mut bits = null_mut();
+            let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+            assert!(!bitmap.is_null());
+            let old = SelectObject(dc, bitmap);
+            let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, (size * size) as usize);
+            for background in [0xffee_eeee, 0xff20_2020] {
+                pixels.fill(background);
+                assert_ne!(
+                    DrawIconEx(dc, 0, 0, icon, size, size, 0, null_mut(), DI_NORMAL),
+                    0
+                );
+                GdiFlush();
+                assert_eq!(pixels[0] & 0x00ff_ffff, background & 0x00ff_ffff);
+                assert!(
+                    pixels
+                        .iter()
+                        .any(|pixel| pixel & 0x00ff_ffff != background & 0x00ff_ffff)
+                );
+            }
+            SelectObject(dc, old);
+            DeleteObject(bitmap);
+            DeleteDC(dc);
+            DestroyIcon(icon);
         }
     }
 
