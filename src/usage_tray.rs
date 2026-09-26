@@ -645,7 +645,7 @@ mod tests {
             for size in [16, 32, 48] {
                 let pixels = icon_pixels(91.0, size);
                 assert_eq!(pixels[0], 0);
-                assert!(pixels.iter().any(|pixel| *pixel == 0xff66_dcaa));
+                assert!(pixels.contains(&0xff66_dcaa));
                 assert!(pixels.iter().any(|pixel| (1..255).contains(&(pixel >> 24))));
                 for pixel in pixels {
                     let alpha = pixel >> 24;

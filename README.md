@@ -6,6 +6,9 @@
 一个轻量级 Windows 启动器：自动找到最新版 `OpenAI.Codex` 中的 ChatGPT，并使用你保存的代理
 设置启动。ChatGPT 升级、安装目录变化后，不需要重新修改快捷方式。
 
+启动器读取当前用户注册的应用包，通过 Windows 应用激活接口启动 ChatGPT 并传递代理参数。
+不会直接运行 WindowsApps 中的 EXE，避免新版 ChatGPT 报“该进程没有程序包标识符”。
+
 ## 功能
 
 - 自动寻找最新版本的 ChatGPT，无需维护 WindowsApps 版本目录

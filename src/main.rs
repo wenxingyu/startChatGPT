@@ -3,16 +3,13 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
 mod config;
 mod memory;
+mod packaged;
 mod settings;
 mod splash;
 mod usage;
@@ -20,7 +17,6 @@ mod usage_tray;
 mod usage_widget;
 
 const PACKAGE_PREFIX: &str = "OpenAI.Codex_";
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct LaunchOptions {
     show_settings: bool,
@@ -75,25 +71,15 @@ fn run() -> Result<(), String> {
         options.proxy_override.unwrap_or(saved_setting)
     };
 
-    let exe = find_chatgpt()?;
-    let working_dir = exe
-        .parent()
-        .ok_or_else(|| format!("无效的 ChatGPT 路径：{}", exe.display()))?;
-
+    let app = packaged::find_registered_app()?;
+    let exe = app.executable;
     let mut splash = splash::Splash::new(&proxy_setting);
-    let mut command = Command::new(&exe);
+    let mut arguments = Vec::new();
     if let Some(argument) = proxy_setting.launch_argument() {
-        command.arg(argument);
+        arguments.push(argument.into());
     }
-    let mut child = command
-        .args(options.forwarded)
-        .current_dir(working_dir)
-        .spawn()
-        .map_err(|error| format!("启动 {} 失败：{error}", exe.display()))?;
-
-    if splash.is_none() {
-        return usage_tray::run(&exe, proxy_setting, true);
-    }
+    arguments.extend(options.forwarded);
+    packaged::activate(&app.aumid, &arguments)?;
 
     let started = Instant::now();
     let timeout = Duration::from_secs(60);
@@ -105,12 +91,6 @@ fn run() -> Result<(), String> {
         if started.elapsed() >= Duration::from_millis(500) && splash::has_visible_window_for(&exe) {
             drop(splash);
             return usage_tray::run(&exe, proxy_setting, true);
-        }
-
-        if let Ok(Some(status)) = child.try_wait()
-            && !status.success()
-        {
-            return Err(format!("ChatGPT 启动进程异常退出：{status}"));
         }
 
         if started.elapsed() >= timeout {
@@ -146,11 +126,10 @@ fn parse_launch_options(args: impl IntoIterator<Item = OsString>) -> Result<Laun
 }
 
 fn find_chatgpt() -> Result<PathBuf, String> {
-    match find_by_scanning_windows_apps() {
+    match packaged::find_registered_app().map(|app| app.executable) {
         Ok(path) => Ok(path),
-        Err(scan_error) => {
-            find_by_appx_package().map_err(|appx_error| format!("{scan_error}\n{appx_error}"))
-        }
+        Err(appx_error) => find_by_scanning_windows_apps()
+            .map_err(|scan_error| format!("{appx_error}\n{scan_error}")),
     }
 }
 
@@ -202,34 +181,6 @@ fn find_by_scanning_windows_apps() -> Result<PathBuf, String> {
             package_arch()
         )
     })
-}
-
-fn find_by_appx_package() -> Result<PathBuf, String> {
-    let script = "(Get-AppxPackage -Name 'OpenAI.Codex' | Sort-Object Version -Descending | Select-Object -First 1 -ExpandProperty InstallLocation)";
-    let mut command = Command::new("powershell.exe");
-    command
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .creation_flags(CREATE_NO_WINDOW);
-
-    let output = command
-        .output()
-        .map_err(|error| format!("查询 OpenAI.Codex Appx 包失败：{error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "查询 OpenAI.Codex Appx 包失败，退出代码：{}",
-            output.status
-        ));
-    }
-
-    let install_dir = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if install_dir.is_empty() {
-        return Err("系统没有返回 OpenAI.Codex 的安装位置".into());
-    }
-
-    let exe = Path::new(&install_dir).join("app").join("chatgpt.exe");
-    exe.is_file()
-        .then_some(exe.clone())
-        .ok_or_else(|| format!("Appx 安装目录中不存在 {}", exe.display()))
 }
 
 fn parse_package_directory(name: &str) -> Option<(Vec<u64>, &str)> {
