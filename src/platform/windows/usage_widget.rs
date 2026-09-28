@@ -26,7 +26,7 @@ fn rgb(r: u32, g: u32, b: u32) -> u32 {
     r | (g << 8) | (b << 16)
 }
 
-pub fn run(app: &Path, proxy: ProxySetting) -> Result<(), String> {
+pub(super) fn run(app: &Path, proxy: ProxySetting) -> Result<(), String> {
     unsafe {
         let class = wide("StartChatGPTQuotaWidget");
         let existing = FindWindowW(class.as_ptr(), null());
@@ -48,7 +48,7 @@ pub fn run(app: &Path, proxy: ProxySetting) -> Result<(), String> {
         }
         let scale = GetDpiForSystem() as f64 / 96.0;
         let state = Arc::new(Mutex::new(usage::State::default()));
-        let (action, worker) = usage::start(app.to_owned(), proxy, state.clone(), None);
+        let (action, worker) = super::start_usage(app.to_owned(), proxy, state.clone(), None);
         UI.with(|ui| {
             *ui.borrow_mut() = Some(Ui {
                 state,
@@ -310,7 +310,7 @@ unsafe fn paint(hwnd: HWND) {
     }
 }
 
-pub(crate) fn details(state: &usage::State) -> String {
+pub(super) fn details(state: &usage::State) -> String {
     let mut lines = vec!["Codex 账户额度（剩余）".to_string()];
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

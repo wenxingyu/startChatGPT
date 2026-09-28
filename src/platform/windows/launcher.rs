@@ -4,12 +4,13 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::{packaged, process, settings, splash, usage_tray, usage_widget};
+use crate::config;
 use crate::launch_options::parse_launch_options;
-use crate::{config, packaged, settings, splash, usage_tray, usage_widget};
 
 const PACKAGE_PREFIX: &str = "OpenAI.Codex_";
 
-pub fn main() {
+pub(super) fn main() {
     // Set awareness before the splash, settings, or hidden tray window is created.
     unsafe {
         windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
@@ -73,7 +74,8 @@ fn run() -> Result<(), String> {
             window.pump();
         }
 
-        if started.elapsed() >= Duration::from_millis(500) && splash::has_visible_window_for(&exe) {
+        if started.elapsed() >= Duration::from_millis(500) && process::has_visible_window_for(&exe)
+        {
             drop(splash);
             return usage_tray::run(&exe, proxy_setting, true);
         }

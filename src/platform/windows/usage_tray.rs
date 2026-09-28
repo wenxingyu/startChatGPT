@@ -41,7 +41,7 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
 
-pub fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), String> {
+pub(super) fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), String> {
     unsafe {
         let class = wide("StartChatGPTQuotaTray");
         if !FindWindowW(class.as_ptr(), null()).is_null() {
@@ -76,7 +76,7 @@ pub fn run(app: &Path, proxy: ProxySetting, exit_with_app: bool) -> Result<(), S
         let mut worker = None;
         let mut success = false;
         if !hwnd.is_null() {
-            let (worker_action, worker_handle) = usage::start(
+            let (worker_action, worker_handle) = super::start_usage(
                 app.to_owned(),
                 proxy,
                 state.clone(),
@@ -129,7 +129,7 @@ fn arm_app_watch(hwnd: HWND) -> bool {
     enum WatchSetup {
         NotRequired,
         AppMissing,
-        Armed(crate::splash::ProcessWait),
+        Armed(super::process::ProcessWait),
     }
 
     let setup = UI.with(|ui| {
@@ -143,7 +143,7 @@ fn arm_app_watch(hwnd: HWND) -> bool {
         if ui.watching_app {
             return WatchSetup::NotRequired;
         }
-        let Some(wait) = crate::splash::process_wait_for(app) else {
+        let Some(wait) = super::process::process_wait_for(app) else {
             return WatchSetup::AppMissing;
         };
         ui.watching_app = true;
@@ -436,7 +436,7 @@ unsafe fn update(hwnd: HWND) -> bool {
         if ok {
             // Icon creation loads comparatively large font/GDI pages. The tray
             // is idle almost all the time, so return those pages to Windows.
-            crate::memory::current_process();
+            super::memory::current_process();
         }
         ok
     }
@@ -461,7 +461,7 @@ unsafe fn details(hwnd: HWND) {
             return;
         }
         let state = UI.with(|ui| ui.borrow().as_ref().unwrap().state.lock().unwrap().clone());
-        let text = crate::usage_widget::details(&state)
+        let text = super::usage_widget::details(&state)
             .replace("左键拖动位置 · 右键打开菜单", "托盘数字为短期剩余百分比");
         SetForegroundWindow(hwnd);
         MessageBoxW(

@@ -2,10 +2,10 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-pub const DEFAULT_PROXY: &str = "http://127.0.0.1:10808";
+pub(crate) const DEFAULT_PROXY: &str = "http://127.0.0.1:10808";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ProxySetting {
+pub(crate) enum ProxySetting {
     Proxy(String),
     Direct,
 }
@@ -17,7 +17,7 @@ impl Default for ProxySetting {
 }
 
 impl ProxySetting {
-    pub fn proxy(value: impl Into<String>) -> Result<Self, String> {
+    pub(crate) fn proxy(value: impl Into<String>) -> Result<Self, String> {
         let value = value.into();
         let value = value.trim();
         if value.is_empty() {
@@ -35,20 +35,20 @@ impl ProxySetting {
         Ok(Self::Proxy(value.into()))
     }
 
-    pub fn proxy_url(&self) -> Option<&str> {
+    pub(crate) fn proxy_url(&self) -> Option<&str> {
         match self {
             Self::Proxy(value) => Some(value),
             Self::Direct => None,
         }
     }
 
-    pub fn launch_argument(&self) -> Option<String> {
+    pub(crate) fn launch_argument(&self) -> Option<String> {
         self.proxy_url()
             .map(|value| format!("--proxy-server={value}"))
     }
 }
 
-pub fn load() -> Result<ProxySetting, String> {
+pub(crate) fn load() -> Result<ProxySetting, String> {
     let path = config_path()?;
     let content = match fs::read_to_string(&path) {
         Ok(content) => content,
@@ -60,7 +60,7 @@ pub fn load() -> Result<ProxySetting, String> {
     parse(&content).map_err(|error| format!("代理设置 {} 无效：{error}", path.display()))
 }
 
-pub fn save(setting: &ProxySetting) -> Result<(), String> {
+pub(crate) fn save(setting: &ProxySetting) -> Result<(), String> {
     let path = config_path()?;
     let parent = path.parent().ok_or("无法确定代理设置目录")?;
     fs::create_dir_all(parent)

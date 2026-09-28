@@ -24,11 +24,11 @@ struct State {
     finished: bool,
 }
 
-pub fn shift_pressed() -> bool {
+pub(super) fn shift_pressed() -> bool {
     unsafe { GetAsyncKeyState(VK_SHIFT.into()) < 0 }
 }
 
-pub fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
+pub(super) fn show(current: &ProxySetting) -> Result<Option<ProxySetting>, String> {
     unsafe {
         SetProcessDPIAware();
         let dpi = GetDpiForSystem().max(96);

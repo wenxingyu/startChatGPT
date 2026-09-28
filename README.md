@@ -185,6 +185,9 @@ bash ./build-macos.sh x86_64-apple-darwin   # Intel
 Rust 测试和原生组件自检。Windows 和 macOS 共用代理解析、命令行参数和额度服务，
 平台启动与界面分别实现。
 
+源码按共享功能与平台实现组织，模块职责、依赖边界和测试方式见
+[代码结构说明](docs/architecture.md)。
+
 ## 许可证
 
 本项目采用 [MIT License](LICENSE)。

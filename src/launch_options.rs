@@ -1,13 +1,13 @@
 use crate::config;
 use std::ffi::OsString;
 
-pub struct LaunchOptions {
+pub(crate) struct LaunchOptions {
     pub show_settings: bool,
     pub proxy_override: Option<config::ProxySetting>,
     pub forwarded: Vec<OsString>,
 }
 
-pub fn parse_launch_options(
+pub(crate) fn parse_launch_options(
     args: impl IntoIterator<Item = OsString>,
 ) -> Result<LaunchOptions, String> {
     let mut options = LaunchOptions {

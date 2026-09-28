@@ -1,5 +1,11 @@
 //! Fault injection with real child processes and pipes; no account or network access.
 use super::*;
+use serde_json::{Value, json};
+use std::io::{BufRead, Write};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn mock_command(mode: &str, release: &Path) -> Command {
@@ -7,7 +13,7 @@ fn mock_command(mode: &str, release: &Path) -> Command {
     command
         .args([
             "--exact",
-            "usage::recovery_tests::mock_server",
+            "usage::service::recovery_tests::mock_server",
             "--ignored",
             "--nocapture",
         ])
@@ -68,32 +74,13 @@ fn mock_server() {
 }
 
 fn mock_bridge(mode: &str, release: &Path) -> Result<Bridge, String> {
-    let mut child = mock_command(mode, release)
+    let child = mock_command(mode, release)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| error.to_string())?;
-    let input = child.stdin.take().unwrap();
-    let output = child.stdout.take().unwrap();
-    let (tx, messages) = mpsc::channel();
-    let reader = thread::spawn(move || {
-        for line in BufReader::new(output).lines() {
-            let Ok(line) = line else { break };
-            if let Ok(value) = serde_json::from_str(&line)
-                && tx.send(value).is_err()
-            {
-                break;
-            }
-        }
-    });
-    Ok(Bridge {
-        child,
-        input,
-        messages,
-        reader: Some(reader),
-        next_id: 1,
-    })
+    Ok(Bridge::from_child(child))
 }
 
 fn wait_state(

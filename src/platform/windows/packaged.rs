@@ -10,12 +10,12 @@ use windows::Win32::UI::Shell::{
 };
 use windows::core::PCWSTR;
 
-pub struct RegisteredApp {
+pub(super) struct RegisteredApp {
     pub executable: PathBuf,
     pub aumid: String,
 }
 
-pub fn find_registered_app() -> Result<RegisteredApp, String> {
+pub(super) fn find_registered_app() -> Result<RegisteredApp, String> {
     // Query the current user's registration, not possibly stale/staged WindowsApps directories.
     // Explicit UTF-8 avoids Windows PowerShell's OEM encoding for non-ASCII install paths.
     let script = r#"$ErrorActionPreference = 'Stop';
@@ -60,7 +60,7 @@ impl Drop for ComApartment {
     }
 }
 
-pub fn activate(aumid: &str, arguments: &[OsString]) -> Result<u32, String> {
+pub(super) fn activate(aumid: &str, arguments: &[OsString]) -> Result<u32, String> {
     let aumid: Vec<u16> = aumid.encode_utf16().chain(Some(0)).collect();
     let arguments = command_line(arguments)?;
     unsafe {
@@ -160,7 +160,7 @@ mod tests {
         let pid = activate(&app.aumid, &[]).unwrap();
         assert_ne!(pid, 0);
         let started = std::time::Instant::now();
-        while !crate::splash::has_visible_window_for(&app.executable) {
+        while !super::super::process::has_visible_window_for(&app.executable) {
             assert!(started.elapsed() < std::time::Duration::from_secs(60));
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
