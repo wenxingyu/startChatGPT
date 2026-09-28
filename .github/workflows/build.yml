@@ -86,6 +86,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out release notes
+        uses: actions/checkout@v4
+
       - name: Download Windows executable
         uses: actions/download-artifact@v4
         with:
@@ -107,15 +110,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes_file="release-notes/$GITHUB_REF_NAME.md"
+          if [ ! -f "$notes_file" ]; then
+            notes_file="release/RELEASE_NOTES.md"
+            printf '%s\n' '附件为 GitHub Actions 构建的 Windows x64 可执行文件和 macOS 应用（Apple Silicon / Intel）。Windows 未签名；macOS 仅使用本地 ad hoc 签名，尚未进行 Developer ID 签名和公证。' > "$notes_file"
+          fi
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
               release/startChatGPT.exe release/startChatGPT-macos-*.zip release/SHA256SUMS.txt \
               --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$GITHUB_REF_NAME" \
+              --notes-file "$notes_file" --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$GITHUB_REF_NAME" \
               release/startChatGPT.exe release/startChatGPT-macos-*.zip release/SHA256SUMS.txt \
-              --verify-tag --generate-notes \
+              --verify-tag \
               --title "startChatGPT $GITHUB_REF_NAME" \
-              --notes "附件为 GitHub Actions 构建的 Windows x64 可执行文件和 macOS 应用（Apple Silicon / Intel）。Windows 未签名；macOS 仅使用本地 ad hoc 签名，尚未进行 Developer ID 签名和公证。" \
+              --notes-file "$notes_file" \
               --repo "$GITHUB_REPOSITORY"
           fi

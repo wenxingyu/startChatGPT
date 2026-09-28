@@ -74,9 +74,10 @@ PATH 中的 `codex.exe` 和桌面端附带的 CLI，也可通过 `STARTCHATGPT_C
 
 ## macOS 使用
 
-macOS 版目前处于适配验证阶段。GitHub Actions 会分别构建 Apple Silicon 和 Intel
-版本，在该开发分支的 Actions 构建产物中提供 ZIP；后续带版本标签的 Release
-也会同时附带两个平台的程序。启动器最低要求 macOS 11，目标桌面应用仍需满足其自身的系统要求。
+从 1.3.0 起，[Releases](https://github.com/wenxingyu/startChatGPT/releases/latest)
+同时提供 macOS 安装包：Apple Silicon 下载 `startChatGPT-macos-aarch64.zip`，
+Intel 下载 `startChatGPT-macos-x86_64.zip`。macOS 版目前处于适配验证阶段；
+启动器最低要求 macOS 11，目标桌面应用仍需满足其自身的系统要求。
 
 解压对应架构的 ZIP，将 `startChatGPT.app` 放入 Applications 后双击启动。
 首次使用默认代理 `http://127.0.0.1:10808`，顶部菜单栏显示短期剩余额度，
