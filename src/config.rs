@@ -74,10 +74,20 @@ pub fn save(setting: &ProxySetting) -> Result<(), String> {
 }
 
 fn config_path() -> Result<PathBuf, String> {
-    env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .map(|path| path.join("startChatGPT").join("config.txt"))
-        .ok_or_else(|| "系统没有提供 APPDATA 目录".into())
+    #[cfg(windows)]
+    {
+        env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .map(|path| path.join("startChatGPT").join("config.txt"))
+            .ok_or_else(|| "系统没有提供 APPDATA 目录".into())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|path| path.join("Library/Application Support/startChatGPT/config.txt"))
+            .ok_or_else(|| "系统没有提供 HOME 目录".into())
+    }
 }
 
 fn parse(content: &str) -> Result<ProxySetting, String> {

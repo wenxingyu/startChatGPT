@@ -1,8 +1,8 @@
-name: Build Windows executable
+name: Build Windows and macOS apps
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -43,10 +43,45 @@ jobs:
           path: target/release/startChatGPT.exe
           if-no-files-found: error
 
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build and test native macOS app
+        run: bash ./build-macos.sh '${{ matrix.target }}'
+
+      - name: Upload macOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: startChatGPT-macos-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/release/startChatGPT-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-    needs: build
+    needs: [build, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -57,9 +92,16 @@ jobs:
           name: startChatGPT-windows-x64-unsigned
           path: release
 
+      - name: Download macOS apps
+        uses: actions/download-artifact@v4
+        with:
+          pattern: startChatGPT-macos-*
+          path: release
+          merge-multiple: true
+
       - name: Generate SHA-256 checksum
         working-directory: release
-        run: sha256sum startChatGPT.exe > SHA256SUMS.txt
+        run: sha256sum startChatGPT.exe startChatGPT-macos-*.zip > SHA256SUMS.txt
 
       - name: Create or update release
         env:
@@ -67,13 +109,13 @@ jobs:
         run: |
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
-              release/startChatGPT.exe release/SHA256SUMS.txt \
+              release/startChatGPT.exe release/startChatGPT-macos-*.zip release/SHA256SUMS.txt \
               --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$GITHUB_REF_NAME" \
-              release/startChatGPT.exe release/SHA256SUMS.txt \
+              release/startChatGPT.exe release/startChatGPT-macos-*.zip release/SHA256SUMS.txt \
               --verify-tag --generate-notes \
               --title "startChatGPT $GITHUB_REF_NAME" \
-              --notes "附件为 GitHub Actions 构建的未签名 Windows x64 可执行文件。" \
+              --notes "附件为 GitHub Actions 构建的 Windows x64 可执行文件和 macOS 应用（Apple Silicon / Intel）。Windows 未签名；macOS 仅使用本地 ad hoc 签名，尚未进行 Developer ID 签名和公证。" \
               --repo "$GITHUB_REPOSITORY"
           fi

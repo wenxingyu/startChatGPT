@@ -1,13 +1,18 @@
 # startChatGPT
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Build Windows executable](https://github.com/wenxingyu/startChatGPT/actions/workflows/build.yml/badge.svg)](https://github.com/wenxingyu/startChatGPT/actions/workflows/build.yml)
+[![Build Windows and macOS apps](https://github.com/wenxingyu/startChatGPT/actions/workflows/build.yml/badge.svg)](https://github.com/wenxingyu/startChatGPT/actions/workflows/build.yml)
 
-一个轻量级 Windows 启动器：自动找到最新版 `OpenAI.Codex` 中的 ChatGPT，并使用你保存的代理
-设置启动。ChatGPT 升级、安装目录变化后，不需要重新修改快捷方式。
+一个轻量级 Windows / macOS 启动器，使用你保存的代理设置启动 ChatGPT/Codex，
+并显示当前 Codex CLI 账户的剩余额度。
 
+Windows 版自动找到最新版 `OpenAI.Codex` 中的 ChatGPT，升级后不需要重新修改快捷方式。
 启动器读取当前用户注册的应用包，通过 Windows 应用激活接口启动 ChatGPT 并传递代理参数。
 不会直接运行 WindowsApps 中的 EXE，避免新版 ChatGPT 报“该进程没有程序包标识符”。
+
+macOS 版使用原生 AppKit 设置窗口和菜单栏额度显示，查找 `/Applications` 或
+`~/Applications` 中的 `Codex.app`、`ChatGPT.app`，优先选择 Codex。
+通过 macOS 应用启动接口传递代理参数和环境变量。
 
 ## 功能
 
@@ -54,7 +59,7 @@ PATH 中的 `codex.exe` 和桌面端附带的 CLI，也可通过 `STARTCHATGPT_C
 
 ![startChatGPT Splash 启动画面](assets/splash.png)
 
-## 下载与使用
+## Windows 下载与使用
 
 1. 前往 [Releases](https://github.com/wenxingyu/startChatGPT/releases/latest) 下载
    `startChatGPT.exe`。
@@ -66,6 +71,57 @@ PATH 中的 `codex.exe` 和桌面端附带的 CLI，也可通过 `STARTCHATGPT_C
 ![startChatGPT 代理设置窗口](assets/settings.png)
 
 设置保存在 `%APPDATA%\startChatGPT\config.txt`，不会因为 ChatGPT 升级而丢失。
+
+## macOS 使用
+
+macOS 版目前处于适配验证阶段。GitHub Actions 会分别构建 Apple Silicon 和 Intel
+版本，在该开发分支的 Actions 构建产物中提供 ZIP；后续带版本标签的 Release
+也会同时附带两个平台的程序。启动器最低要求 macOS 11，目标桌面应用仍需满足其自身的系统要求。
+
+解压对应架构的 ZIP，将 `startChatGPT.app` 放入 Applications 后双击启动。
+首次使用默认代理 `http://127.0.0.1:10808`，顶部菜单栏显示短期剩余额度，
+点击可看两个周期的额度和重置时间、刷新或退出额度显示。
+退出额度显示不会关闭桌面端；正常启动模式下，桌面端完全退出后额度显示也会退出。
+额度显示只运行一个实例，重复打开不会新增菜单栏图标。
+
+修改代理设置（Mac 版通过命令行打开设置窗口）：
+
+```bash
+"/Applications/startChatGPT.app/Contents/MacOS/startChatGPT" --settings
+```
+
+临时覆盖代理、不使用代理、只显示额度、打开额度小窗：
+
+```bash
+"/Applications/startChatGPT.app/Contents/MacOS/startChatGPT" --proxy=http://127.0.0.1:7890
+"/Applications/startChatGPT.app/Contents/MacOS/startChatGPT" --no-proxy
+"/Applications/startChatGPT.app/Contents/MacOS/startChatGPT" --usage-only
+"/Applications/startChatGPT.app/Contents/MacOS/startChatGPT" --usage-widget
+```
+
+`--usage-only` 和 `--usage-widget` 不启动桌面端，也可以在未安装桌面端时使用，
+但必须安装并登录 Codex CLI。Mac 版支持命令行代理覆盖同时作用于额度服务。
+配置保存在 `~/Library/Application Support/startChatGPT/config.txt`。
+Mac 版暂未实现 Windows 版的启动动画和 Shift 双击设置入口。
+
+桌面端已运行时，新的参数和环境变量不能重新应用；启动器会提示先完全退出
+Codex/ChatGPT，再通过启动器打开。启动器不会强制结束桌面端进程。
+代理参数及环境变量是否被当前桌面端的所有网络请求采用，仍需实际验证，
+请参阅 [Mac 验证清单](docs/macos-testing.md)。
+
+自定义桌面端位置或 Codex CLI 位置：
+
+```bash
+STARTCHATGPT_APP_PATH="$HOME/Applications/Codex.app" \
+  "/Applications/startChatGPT.app/Contents/MacOS/startChatGPT"
+STARTCHATGPT_CODEX_EXE="/opt/homebrew/bin/codex" \
+  "/Applications/startChatGPT.app/Contents/MacOS/startChatGPT" --usage-only
+```
+
+Finder 启动时的 PATH 可能和终端不同。启动器额外寻找 Homebrew、`~/.npm-global/bin`、
+`~/.local/bin` 和桌面端内附带的 CLI；自定义安装可使用上述环境变量。
+macOS 构建仅有本地 ad hoc 签名，尚未做 Developer ID 签名与公证；系统可能阻止
+首次打开。确认下载来源后，可以在系统设置的“隐私与安全性”中允许打开。
 
 ## Code signing policy
 
@@ -105,13 +161,27 @@ certificate by SignPath Foundation。
 
 ## 从源码编译
 
+Windows：
+
 ```powershell
-cd C:\Code\ontology\startChatGPT-rust
+cd C:\Code\startChatGPT
 .\build.ps1
 ```
 
 Release 配置针对体积优化：完整 LTO、单 codegen unit、`panic = "abort"` 并移除符号。
 构建脚本会从 `Cargo.toml` 自动生成 Windows 文件版本，并与 ChatGPT 图标一起嵌入 EXE。
+
+macOS（需要 Rust 和 Xcode Command Line Tools）：
+
+```bash
+bash ./build-macos.sh aarch64-apple-darwin   # Apple Silicon
+bash ./build-macos.sh x86_64-apple-darwin   # Intel
+```
+
+输出位于 `target/<架构>/release/startChatGPT.app` 和同目录下的 ZIP。
+脚本构建 Rust 启动器和 Swift AppKit 界面组件；在与目标架构相同的 Mac 上，还会运行
+Rust 测试和原生组件自检。Windows 和 macOS 共用代理解析、命令行参数和额度服务，
+平台启动与界面分别实现。
 
 ## 许可证
 
