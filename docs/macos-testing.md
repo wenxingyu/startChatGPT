@@ -28,6 +28,7 @@
 - 安装并登录 Codex CLI，桌面端和 CLI 使用同一个账户。
 - 分别验证 Homebrew、npm 和自定义 STARTCHATGPT_CODEX_EXE 安装位置。
 - 在 Finder 启动环境中测试 npm CLI，确认能够找到其 Node 解释器。
+- 仅安装桌面端、不另装 CLI，且不设置 STARTCHATGPT_CODEX_EXE；在 Finder 的精简 PATH 下确认可以发现桌面端内置 CLI 并读取额度。覆盖 `Contents/Resources/codex` 和 `Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex` 两种布局。
 - 确认菜单栏和详情窗口显示两个额度周期、正确百分比、本地时区的重置时间。
 - 手动刷新、等待自动刷新，确认数据正常更新；额度请求不创建模型任务。
 - 临时断开代理，确认旧数字保留、显示过期及错误；恢复后确认自动恢复。

@@ -143,6 +143,7 @@ pub(crate) fn candidates(app: &Path) -> Vec<PathBuf> {
         }
         if !app.as_os_str().is_empty() {
             paths.push(app.join("Contents/Resources/codex"));
+            paths.push(app.join("Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"));
         }
     }
     paths
