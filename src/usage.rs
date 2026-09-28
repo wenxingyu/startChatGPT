@@ -176,6 +176,10 @@ impl Bridge {
             ] {
                 command.env_remove(key);
             }
+            #[cfg(target_os = "macos")]
+            for key in ["NO_PROXY", "no_proxy"] {
+                command.env_remove(key);
+            }
             if let Some(url) = proxy.proxy_url() {
                 command
                     .env("HTTP_PROXY", url)
