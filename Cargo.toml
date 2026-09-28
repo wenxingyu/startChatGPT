@@ -5,7 +5,7 @@ edition = "2024"
 build = "build.rs"
 license = "MIT"
 repository = "https://github.com/wenxingyu/startChatGPT"
-description = "A lightweight Windows launcher for ChatGPT/Codex with configurable proxy support"
+description = "A lightweight Windows and macOS launcher for ChatGPT/Codex with configurable proxy support"
 
 [package.metadata.winresource]
 FileDescription = "startChatGPT - ChatGPT 代理启动器"
@@ -33,5 +33,7 @@ winresource = "0.1.31"
 
 [dependencies]
 serde_json = "1.0.151"
+
+[target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

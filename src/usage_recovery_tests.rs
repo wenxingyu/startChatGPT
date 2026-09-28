@@ -12,8 +12,9 @@ fn mock_command(mode: &str, release: &Path) -> Command {
             "--nocapture",
         ])
         .env("QUOTA_TEST_MODE", mode)
-        .env("QUOTA_TEST_RELEASE", release)
-        .creation_flags(0x0800_0000);
+        .env("QUOTA_TEST_RELEASE", release);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
     command
 }
 

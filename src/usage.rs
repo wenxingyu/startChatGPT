@@ -2,12 +2,14 @@
 use crate::config::ProxySetting;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
+#[cfg(windows)]
 use windows_sys::Win32::{Foundation::HWND, UI::WindowsAndMessaging::PostMessageW};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,12 +105,13 @@ impl Drop for Bridge {
     }
 }
 
-fn candidates(app: &Path) -> Vec<PathBuf> {
+pub(crate) fn candidates(app: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     // An explicit executable override is useful for portable CLI installations.
     if let Some(path) = std::env::var_os("STARTCHATGPT_CODEX_EXE") {
         paths.push(path.into());
     }
+    #[cfg(windows)]
     if let Some(root) = std::env::var_os("APPDATA") {
         let package = PathBuf::from(root).join("npm/node_modules/@openai/codex");
         let (arch, triple) = if cfg!(target_arch = "aarch64") {
@@ -122,12 +125,31 @@ fn candidates(app: &Path) -> Vec<PathBuf> {
         paths.push(package.join(format!("vendor/{triple}/codex/codex.exe")));
     }
     if let Some(path) = std::env::var_os("PATH") {
-        paths.extend(std::env::split_paths(&path).map(|p| p.join("codex.exe")));
+        paths.extend(std::env::split_paths(&path).map(|p| p.join(cli_name())));
     }
+    #[cfg(windows)]
     if let Some(parent) = app.parent() {
         paths.push(parent.join("resources/codex.exe"));
     }
+    #[cfg(target_os = "macos")]
+    {
+        // Finder-launched apps do not inherit the interactive shell's PATH.
+        paths.push("/opt/homebrew/bin/codex".into());
+        paths.push("/usr/local/bin/codex".into());
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = PathBuf::from(home);
+            paths.push(home.join(".npm-global/bin/codex"));
+            paths.push(home.join(".local/bin/codex"));
+        }
+        if !app.as_os_str().is_empty() {
+            paths.push(app.join("Contents/Resources/codex"));
+        }
+    }
     paths
+}
+
+const fn cli_name() -> &'static str {
+    if cfg!(windows) { "codex.exe" } else { "codex" }
 }
 
 impl Bridge {
@@ -138,8 +160,11 @@ impl Bridge {
                 .arg("app-server")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .creation_flags(0x0800_0000);
+                .stderr(Stdio::null());
+            #[cfg(windows)]
+            command.creation_flags(0x0800_0000);
+            #[cfg(target_os = "macos")]
+            command.env("PATH", macos_cli_path());
             // Do not inherit an accidental proxy when direct mode was selected.
             for key in [
                 "HTTP_PROXY",
@@ -182,10 +207,13 @@ impl Bridge {
                 reader: Some(reader),
                 next_id: 1,
             };
-            bridge.request("initialize", Some(json!({"clientInfo": {
+            // A stale or incompatible bundled CLI must not prevent trying the
+            // next candidate. Drop the failed bridge before reconnecting.
+            if bridge.request("initialize", Some(json!({"clientInfo": {
                 "name": "startchatgpt_usage", "title": "Codex Quota Monitor", "version": env!("CARGO_PKG_VERSION")
-            }})))?;
-            bridge.send(json!({"method":"initialized", "params":{}}))?;
+            }}))).is_err() || bridge.send(json!({"method":"initialized", "params":{}})).is_err() {
+                continue;
+            }
             return Ok(bridge);
         }
         Err("找不到可运行的 Codex CLI；请安装并登录 Codex CLI".into())
@@ -230,16 +258,48 @@ impl Bridge {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn macos_cli_path() -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths: Vec<PathBuf> = std::env::split_paths(&inherited).collect();
+    // npm's codex wrapper uses /usr/bin/env node. Finder's PATH often omits
+    // Homebrew, so finding the wrapper alone does not make it runnable.
+    for path in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+        let path = PathBuf::from(path);
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    std::env::join_paths(paths).unwrap_or(inherited)
+}
+
 pub enum Action {
     Refresh,
     Stop,
 }
 
+pub type Notify = Box<dyn Fn() + Send>;
+
+#[cfg(windows)]
 pub fn start(
     app: PathBuf,
     proxy: ProxySetting,
     state: Arc<Mutex<State>>,
     notify: Option<(usize, u32)>,
+) -> (mpsc::Sender<Action>, thread::JoinHandle<()>) {
+    let notify = notify.map(|(hwnd, message)| {
+        Box::new(move || unsafe {
+            PostMessageW(hwnd as HWND, message, 0, 0);
+        }) as Notify
+    });
+    start_with_notify(app, proxy, state, notify)
+}
+
+pub fn start_with_notify(
+    app: PathBuf,
+    proxy: ProxySetting,
+    state: Arc<Mutex<State>>,
+    notify: Option<Notify>,
 ) -> (mpsc::Sender<Action>, thread::JoinHandle<()>) {
     start_with_connector(move || Bridge::connect(&app, &proxy), state, notify)
 }
@@ -247,7 +307,7 @@ pub fn start(
 fn start_with_connector(
     mut connect: impl FnMut() -> Result<Bridge, String> + Send + 'static,
     state: Arc<Mutex<State>>,
-    notify: Option<(usize, u32)>,
+    notify: Option<Notify>,
 ) -> (mpsc::Sender<Action>, thread::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel();
     let worker = thread::spawn(move || {
@@ -277,10 +337,8 @@ fn start_with_connector(
                     }
                 }
             }
-            if let Some((hwnd, message)) = notify {
-                unsafe {
-                    PostMessageW(hwnd as HWND, message, 0, 0);
-                }
+            if let Some(notify) = &notify {
+                notify();
             }
             // Process cleanup can block. Publish the error and release the UI's
             // state lock first, so details and the tray menu stay responsive.
