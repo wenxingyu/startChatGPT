@@ -11,7 +11,7 @@ Windows 版自动找到最新版 `OpenAI.Codex` 中的 ChatGPT，升级后不需
 不会直接运行 WindowsApps 中的 EXE，避免新版 ChatGPT 报“该进程没有程序包标识符”。
 
 macOS 版使用原生 AppKit 设置窗口和菜单栏额度显示，查找 `/Applications` 或
-`~/Applications` 中的 `Codex.app`、`ChatGPT.app`，优先选择 Codex。
+`~/Applications` 中的 `ChatGPT.app`。
 通过 macOS 应用启动接口传递代理参数和环境变量。
 
 ## 功能
@@ -79,7 +79,8 @@ PATH 中的 `codex.exe` 和桌面端附带的 CLI，也可通过 `STARTCHATGPT_C
 Intel 下载 `startChatGPT-macos-x86_64.zip`。macOS 版目前处于适配验证阶段；
 启动器最低要求 macOS 11，目标桌面应用仍需满足其自身的系统要求。
 
-解压对应架构的 ZIP，将 `startChatGPT.app` 放入 Applications 后双击启动。
+解压对应架构的 ZIP，将 `startChatGPT.app` 放入 Applications 后双击启动 ChatGPT。
+应用包包含与 Windows 版一致的 ChatGPT 图标。
 首次使用默认代理 `http://127.0.0.1:10808`，顶部菜单栏显示短期剩余额度，
 点击可看两个周期的额度和重置时间、刷新或退出额度显示。
 退出额度显示不会关闭桌面端；正常启动模式下，桌面端完全退出后额度显示也会退出。
@@ -106,14 +107,14 @@ Intel 下载 `startChatGPT-macos-x86_64.zip`。macOS 版目前处于适配验证
 Mac 版暂未实现 Windows 版的启动动画和 Shift 双击设置入口。
 
 桌面端已运行时，新的参数和环境变量不能重新应用；启动器会提示先完全退出
-Codex/ChatGPT，再通过启动器打开。启动器不会强制结束桌面端进程。
+ChatGPT，再通过启动器打开。启动器不会强制结束桌面端进程。
 代理参数及环境变量是否被当前桌面端的所有网络请求采用，仍需实际验证，
 请参阅 [Mac 验证清单](docs/macos-testing.md)。
 
 自定义桌面端位置或 Codex CLI 位置：
 
 ```bash
-STARTCHATGPT_APP_PATH="$HOME/Applications/Codex.app" \
+STARTCHATGPT_APP_PATH="$HOME/Applications/ChatGPT.app" \
   "/Applications/startChatGPT.app/Contents/MacOS/startChatGPT"
 STARTCHATGPT_CODEX_EXE="/opt/homebrew/bin/codex" \
   "/Applications/startChatGPT.app/Contents/MacOS/startChatGPT" --usage-only

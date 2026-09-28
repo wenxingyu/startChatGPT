@@ -9,6 +9,7 @@
 - 在 Apple Silicon 和 Intel 构建机分别运行 `bash build-macos.sh <target>`。
 - 确认 Rust 测试、Swift 原生组件自检、签名校验和 ZIP 打包通过。
 - 解压 ZIP，将 `.app` 放入 Applications，通过 Finder 打开，确认原生组件能够运行。
+- 确认 Finder 和 Launchpad 显示 ChatGPT 图标，应用包内包含 `chatgpt.icns` 且 Info.plist 声明该图标。
 - 确认使用支持相应 CPU 架构及系统版本的桌面应用；启动器支持 Intel 不代表所有桌面端版本都支持 Intel。
 
 ## 启动和代理
@@ -21,7 +22,7 @@
 - 如果桌面端忽略代理参数或环境变量，记录其版本和具体未代理的功能，
   不应把“启动成功”当作代理验证通过；进一步适配后再发布正式支持声明。
 - 设置窗口取消后，确认未保存配置，也未启动桌面端。
-- 两个应用同时安装时，确认优先启动 Codex；通过 STARTCHATGPT_APP_PATH 指定其他安装位置。
+- 两个应用同时安装时，确认只启动 ChatGPT；仅安装 Codex 时应提示未找到 ChatGPT。通过 STARTCHATGPT_APP_PATH 指定其他安装位置。
 
 ## 额度和生命周期
 

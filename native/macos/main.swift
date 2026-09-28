@@ -92,7 +92,7 @@ func launch(_ request: [String: Any]) {
     let bundle = URL(fileURLWithPath: path, isDirectory: true)
     // LaunchServices cannot change the arguments/environment of an existing app.
     if !applications(at: bundle).isEmpty {
-        finish(["error": "桌面端已在运行，无法应用新的代理设置。请先完全退出 Codex/ChatGPT，再通过 startChatGPT 启动；只看额度可使用 --usage-only。"], code: 1)
+        finish(["error": "ChatGPT 已在运行，无法应用新的代理设置。请先完全退出 ChatGPT，再通过 startChatGPT 启动；只看额度可使用 --usage-only。"], code: 1)
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.arguments = arguments

@@ -83,12 +83,9 @@ fn setting_from_response(value: &Value) -> Result<Option<config::ProxySetting>, 
 
 fn app_candidates(home: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    // Prefer the Codex bundle when both apps are installed, matching Windows.
-    for name in ["Codex.app", "ChatGPT.app"] {
-        paths.push(Path::new("/Applications").join(name));
-        if let Some(home) = home {
-            paths.push(home.join("Applications").join(name));
-        }
+    paths.push(Path::new("/Applications/ChatGPT.app").to_owned());
+    if let Some(home) = home {
+        paths.push(home.join("Applications/ChatGPT.app"));
     }
     paths
 }
@@ -112,7 +109,10 @@ fn find_app() -> Result<PathBuf, String> {
     app_candidates(home.as_deref())
         .into_iter()
         .find(|path| valid_bundle(path))
-        .ok_or_else(|| "没有找到 Codex.app 或 ChatGPT.app；请安装到 /Applications，或用 STARTCHATGPT_APP_PATH 指定应用位置".into())
+        .ok_or_else(|| {
+            "没有找到 ChatGPT.app；请安装到 /Applications，或用 STARTCHATGPT_APP_PATH 指定应用位置"
+                .into()
+        })
 }
 
 fn ui_path() -> Result<PathBuf, String> {
@@ -311,15 +311,17 @@ mod tests {
     }
 
     #[test]
-    fn discovery_prefers_codex_and_supports_user_applications() {
+    fn discovery_only_uses_chatgpt_and_supports_user_applications() {
         assert_eq!(
             app_candidates(Some(Path::new("/Users/test"))),
             [
-                PathBuf::from("/Applications/Codex.app"),
-                PathBuf::from("/Users/test/Applications/Codex.app"),
                 PathBuf::from("/Applications/ChatGPT.app"),
                 PathBuf::from("/Users/test/Applications/ChatGPT.app")
             ]
+        );
+        assert_eq!(
+            app_candidates(None),
+            [PathBuf::from("/Applications/ChatGPT.app")]
         );
     }
 

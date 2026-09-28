@@ -19,6 +19,7 @@ export MACOSX_DEPLOYMENT_TARGET=11.0
 cargo build --release --locked --target "$target"
 output="target/$target/release"
 swiftc -swift-version 5 -O -target "$swift_target" -framework AppKit \
+    -module-cache-path "$output/swift-module-cache" \
     native/macos/main.swift -o "$output/startChatGPT-ui"
 
 # Tests must run on the matching host architecture; builds can cross-compile.
@@ -32,6 +33,7 @@ bundle="$output/startChatGPT.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp "$output/startChatGPT" "$bundle/Contents/MacOS/startChatGPT"
 cp "$output/startChatGPT-ui" "$bundle/Contents/Resources/startChatGPT-ui"
+cp assets/chatgpt.icns "$bundle/Contents/Resources/chatgpt.icns"
 version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
 cat > "$bundle/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -41,6 +43,7 @@ cat > "$bundle/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>startChatGPT</string>
   <key>CFBundleIdentifier</key><string>io.github.wenxingyu.startChatGPT</string>
   <key>CFBundleExecutable</key><string>startChatGPT</string>
+  <key>CFBundleIconFile</key><string>chatgpt.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleVersion</key><string>$version</string>
